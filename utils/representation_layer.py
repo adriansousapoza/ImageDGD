@@ -17,7 +17,7 @@ class RepresentationLayer(nn.Module):
     ######################## PUBLIC ATTRIBUTE #########################
 
     # Set the available distributions to sample the representations from
-    AVAILABLE_DISTS = ["normal", "uniform", "laplace", "student_t", "cauchy"]
+    AVAILABLE_DISTS = ["normal", "uniform", "laplace", "student_t", "cauchy", "uniform_ball", "zeros"]
 
     ######################### INITIALIZATION ##########################
     
@@ -46,7 +46,8 @@ class RepresentationLayer(nn.Module):
             initialized by sampling the distribution specified
             by ``dist``.
 
-        dist : ``str``, {``"normal"``, ``"uniform"``, ``"laplace"``, ``"student_t"``, ``"cauchy"``}, default: ``"normal"``
+        dist : ``str``, {``"normal"``, ``"uniform"``, ``"laplace"``, ``"student_t"``, 
+                         ``"cauchy"``, ``"uniform_ball"``, ``"zeros"``}, default: ``"normal"``
             The name of the distribution used to sample the
             representations, if no ``values`` are passed.
 
@@ -86,6 +87,11 @@ class RepresentationLayer(nn.Module):
             
             - For ``"cauchy"``:
               * ``"scale"`` : scale parameter (default: 1.0)
+              
+            - For ``"uniform_ball"``:
+              * ``"radius"`` : radius of the ball (default: 1.0)
+              
+            - For ``"zeros"``: No additional parameters
         """
         # Setup device
         self.device = device or (values.device if values is not None else 
@@ -119,6 +125,10 @@ class RepresentationLayer(nn.Module):
                 self._n_rep, self._dim, self._z, self._options = self._get_rep_from_student_t(options=dist_options)
             elif dist == "cauchy":
                 self._n_rep, self._dim, self._z, self._options = self._get_rep_from_cauchy(options=dist_options)
+            elif dist == "uniform_ball":
+                self._n_rep, self._dim, self._z, self._options = self._get_rep_from_uniform_ball(options=dist_options)
+            elif dist == "zeros":
+                self._n_rep, self._dim, self._z, self._options = self._get_rep_from_zeros(options=dist_options)
             else:
                 # Raise an error for unsupported distribution
                 available_dists_str = ", ".join(f'"{d}"' for d in self.AVAILABLE_DISTS)
@@ -128,6 +138,7 @@ class RepresentationLayer(nn.Module):
         
         # Move to the specified device
         self._z = self._z.to(self.device)
+
 
     def _get_rep_from_values(self, values: Tensor) -> Tuple[int, int, Tensor]:
         """Get the representations from a given tensor of values.
@@ -174,6 +185,47 @@ class RepresentationLayer(nn.Module):
         # Return the number of representations, the dimensionality of
         # the representations, and the values of the representations.
         return n_rep, dim, z
+    
+    def _get_rep_from_zeros(self, options: Dict[str, Any]) -> Tuple[int, int, Tensor, Dict[str, Any]]:
+        """Get the representations initialized as zeros.
+
+        Parameters
+        ----------
+        options : ``dict``
+            A dictionary containing the parameters for zero initialization.
+
+            Required parameters:
+            * ``"n_samples"`` : the number of samples
+            * ``"dim"`` : the dimensionality of the representations
+
+        Returns
+        -------
+        n_rep : ``int``
+            The number of representations.
+
+        dim : ``int``
+            The dimensionality of the representations.
+
+        rep : ``torch.Tensor``
+            The values of the representations.
+
+        options : ``dict``
+            A dictionary containing the options used to initialize
+            the representations.
+        """
+        # Get parameters
+        n_rep = options["n_samples"]
+        dim = options["dim"]
+        
+        # Create tensor of zeros
+        samples = torch.zeros(n_rep, dim, device=self.device)
+        
+        # Create parameter
+        z = nn.Parameter(samples, requires_grad=True)
+        
+        return n_rep, dim, z, {
+            "dist_name": "zeros"
+        }
 
     def _get_rep_from_normal(self, options: Dict[str, Any]) -> Tuple[int, int, Tensor, Dict[str, Any]]:
         """Get the representations by sampling from a normal distribution.
@@ -307,6 +359,65 @@ class RepresentationLayer(nn.Module):
         # Return the number of representations, the dimensionality,
         # the values of the representations, and the options used
         return n_rep, dim, z, {"dist_name": "uniform", "low": low, "high": high}
+    
+    def _get_rep_from_uniform_ball(self, options: Dict[str, Any]) -> Tuple[int, int, Tensor, Dict[str, Any]]:
+        """Get the representations by sampling uniformly from a ball.
+
+        Parameters
+        ----------
+        options : ``dict``
+            A dictionary containing the parameters to sample the
+            representations uniformly from a ball.
+
+            Required parameters:
+            * ``"n_samples"`` : the number of samples to draw
+            * ``"dim"`` : the dimensionality of the representations
+
+            Optional parameters:
+            * ``"radius"`` : radius of the ball (default: 1.0)
+
+        Returns
+        -------
+        n_rep : ``int``
+            The number of representations.
+
+        dim : ``int``
+            The dimensionality of the representations.
+
+        rep : ``torch.Tensor``
+            The values of the representations.
+
+        options : ``dict``
+            A dictionary containing the options used to initialize
+            the representations.
+        """
+        # Get parameters
+        n_rep = options["n_samples"]
+        dim = options["dim"]
+        radius = options.get("radius", 1.0)
+
+        # Generate random directions by sampling from normal distribution
+        # and normalizing to unit vectors
+        normal_samples = torch.randn(n_rep, dim, device=self.device)
+        normal_samples_norm = torch.norm(normal_samples, dim=1, keepdim=True)
+        unit_directions = normal_samples / normal_samples_norm
+        
+        # Generate random radii with proper distribution for uniform sampling within a ball
+        # For uniform distribution in a ball, we need r^(dim-1) distribution of distances
+        # from the center, which is achieved by taking u^(1/dim) where u is uniform(0,1)
+        u = torch.rand(n_rep, 1, device=self.device)
+        random_radii = radius * u.pow(1.0 / dim)
+        
+        # Scale the unit directions by the random radii
+        samples = unit_directions * random_radii
+        
+        # Create parameter
+        z = nn.Parameter(samples, requires_grad=True)
+        
+        return n_rep, dim, z, {
+            "dist_name": "uniform_ball",
+            "radius": radius
+        }
 
     def _get_rep_from_laplace(self, options: Dict[str, Any]) -> Tuple[int, int, Tensor, Dict[str, Any]]:
         """Get the representations by sampling from a Laplace distribution.
@@ -539,55 +650,56 @@ class RepresentationLayer(nn.Module):
     ######################### PUBLIC METHODS ##########################
 
     def forward(self, ixs: Optional[Union[List[int], Tensor]] = None, 
+                index_map: Optional[Dict[int, int]] = None,
                 batch_size: Optional[int] = None) -> Tensor:
-        """Forward pass - it returns the values of the representations.
-
-        You can select a subset of representations to be returned using
-        their numerical indexes.
+        """Forward pass that returns the representation values.
 
         Parameters
         ----------
-        ixs : ``list`` or ``Tensor``, optional
-            The indexes of the samples whose representations should
-            be returned. If not passed, all representations will be
-            returned.
+        ixs : list or Tensor, optional
+            The indices of the samples to return representations for.
             
-        batch_size : ``int``, optional
-            If specified and ixs contains more than batch_size indices,
-            processes the representations in batches for memory efficiency.
+        index_map : dict, optional
+            A mapping from dataset indices to representation indices.
+            
+        batch_size : int, optional
+            Process representations in batches for memory efficiency.
 
         Returns
         -------
-        reps : ``torch.Tensor``
-            A tensor containing the values of the representations for
-            the samples of interest.
-
-            This is a 2D tensor where:
-
-            * The first dimension has a length equal to the number
-              of representations.
-
-            * The second dimension has a length equal to the
-              dimensionality of the representations.
+        torch.Tensor
+            The requested representations.
         """
-        # If no indexes were provided
+        # If no indices were provided, return all representations
         if ixs is None:
-            # Return the values for all representations
             return self.z
         
-        # If batch_size is specified and we have more indices than the batch size
-        if batch_size is not None and len(ixs) > batch_size:
-            # Process in batches for memory efficiency
+        # If we have an index mapping, use it to convert dataset indices to representation indices
+        if index_map is not None:
+            # Handle both list and tensor inputs
+            if isinstance(ixs, torch.Tensor):
+                mapped_ixs = torch.tensor([index_map.get(idx.item(), 0) for idx in ixs], 
+                                        device=ixs.device)
+            else:
+                mapped_ixs = [index_map.get(idx, 0) for idx in ixs]
+        else:
+            # If there's no mapping, perform bounds checking
+            if isinstance(ixs, torch.Tensor):
+                # Clamp indices to valid range to prevent out-of-bounds errors
+                mapped_ixs = torch.clamp(ixs, 0, len(self.z)-1)
+            else:
+                mapped_ixs = [min(max(0, idx), len(self.z)-1) for idx in ixs]
+        
+        # Process in batches if needed
+        if batch_size is not None and len(mapped_ixs) > batch_size:
             result_chunks = []
-            for i in range(0, len(ixs), batch_size):
-                batch_ixs = ixs[i:i+batch_size]
+            for i in range(0, len(mapped_ixs), batch_size):
+                batch_ixs = mapped_ixs[i:i+batch_size]
                 result_chunks.append(self.z[batch_ixs])
-            
-            # Concatenate the results
             return torch.cat(result_chunks, dim=0)
         
-        # Otherwise return representations for the specified indices
-        return self.z[ixs]
+        # Return representations for the specified indices
+        return self.z[mapped_ixs]
 
     def to(self, device: Union[str, torch.device]) -> 'RepresentationLayer':
         """Move representations to specified device.
