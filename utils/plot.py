@@ -7,6 +7,55 @@ from sklearn.decomposition import PCA, KernelPCA
 from sklearn.manifold import TSNE
 from umap import UMAP
 import torch
+import os
+
+def ensure_dir(directory):
+    """Create directory if it doesn't exist."""
+    if not os.path.exists(directory):
+        os.makedirs(directory)
+        print(f"Created directory: {directory}")
+
+def save_figure(fig, filename, base_dir="figures", subdir=None, dpi=200, 
+                format="png", close_fig=True):
+    """
+    Save a matplotlib figure to a file.
+    
+    Parameters
+    ----------
+    fig : matplotlib.figure.Figure
+        The figure to save
+    filename : str
+        Base filename without extension
+    base_dir : str
+        Base directory for saving figures
+    subdir : str or None
+        Subdirectory within base_dir
+    dpi : int
+        Resolution for saving the figure
+    format : str
+        File format (png recommended for plots with many points)
+    close_fig : bool
+        Whether to close the figure after saving
+    """
+    # Create full directory path
+    if subdir:
+        directory = os.path.join(base_dir, subdir)
+    else:
+        directory = base_dir
+    
+    # Ensure directory exists
+    ensure_dir(directory)
+    
+    # Create full file path with extension
+    filepath = os.path.join(directory, f"{filename}.{format}")
+    
+    # Save the figure
+    fig.savefig(filepath, dpi=dpi, format=format, bbox_inches='tight')
+        
+    # Close figure to free memory if requested
+    if close_fig:
+        plt.close(fig)
+
 
 class LatentSpaceVisualizer:
     """
@@ -460,7 +509,10 @@ class LatentSpaceVisualizer:
         
         # Finalize and show the plot
         self._finalize_plot(fig, axes)
-        plt.show()
+        epoch = kwargs.get('epoch', 'final')
+        filename = f"epoch_{epoch}"
+        subdir = f"latent/{method.lower()}"
+        save_figure(fig, filename, subdir=subdir)
         
         return fig
     
@@ -529,7 +581,9 @@ def plot_training_losses(train_losses, test_losses, recon_train_losses, recon_te
         fig.suptitle(title, fontsize=16, y=0.98)
     
     plt.tight_layout()
-    plt.show()
+    epoch = title.split()[-1] if title and "Epoch" in title else "final"
+    filename = f"losses_epoch_{epoch}"
+    save_figure(fig, filename, subdir="losses")
     
     return fig
 
@@ -580,7 +634,6 @@ def plot_images(images, labels, title, epoch=None, cmap='viridis'):
             stacked_images.extend(imgs)
             stacked_labels.append(label_map[label])  # Add label once per column
 
-    print(f"Plotting {len(stacked_images)} images.")
     n_labels = len(stacked_labels)
     if n_labels == 0:
         print("No images to plot.")
@@ -608,7 +661,9 @@ def plot_images(images, labels, title, epoch=None, cmap='viridis'):
         title = f'{title}'
     plt.suptitle(title)
     plt.tight_layout()
-    plt.show()
+    clean_title = title.replace(" ", "_").replace("/", "_").lower()
+    filename = f"{clean_title}_epoch_{epoch if epoch is not None else 'final'}"
+    save_figure(fig, filename, subdir="images")
 
 
 def plot_gmm_images(model, gmm, title, epoch=None, cmap='viridis', top_n=10, device='cuda'):
@@ -686,7 +741,9 @@ def plot_gmm_images(model, gmm, title, epoch=None, cmap='viridis', top_n=10, dev
             plt.suptitle(title)
             
         plt.tight_layout()
-        plt.show()
+        clean_title = title.replace(" ", "_").replace("/", "_").lower()
+        filename = f"gmm_means_{clean_title}_epoch_{epoch if epoch is not None else 'final'}"
+        save_figure(fig, filename, subdir="gmm")
 
 def plot_gmm_samples(model, gmm, title, n_samples=20, epoch=None, cmap='viridis', device='cuda'):
     """
@@ -751,4 +808,6 @@ def plot_gmm_samples(model, gmm, title, n_samples=20, epoch=None, cmap='viridis'
             plt.suptitle(title)
             
         plt.tight_layout()
-        plt.show()
+        clean_title = title.replace(" ", "_").replace("/", "_").lower()
+        filename = f"gmm_samples_{clean_title}_epoch_{epoch if epoch is not None else 'final'}"
+        save_figure(fig, filename, subdir="gmm")
