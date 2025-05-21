@@ -64,11 +64,38 @@ class ConvDecoder(BaseDecoder):
                  output_size: Tuple[int, int] = (28, 28),
                  init_size: Tuple[int, int] = None,
                  use_batch_norm: bool = True,
-                 use_leaky_relu: bool = True,
-                 use_tanh: bool = True,
+                 activation: str = 'leaky_relu',
+                 final_activation: str = 'sigmoid',
                  dropout_rate: float = 0.0,
                  **kwargs) -> None:
         super(ConvDecoder, self).__init__()
+        
+        # Define available activation functions
+        self.activations = {
+            'relu': nn.ReLU(),
+            'leaky_relu': nn.LeakyReLU(0.2),
+            'elu': nn.ELU(),
+            'selu': nn.SELU(),
+            'gelu': nn.GELU(),
+            'tanh': nn.Tanh(),
+            'sigmoid': nn.Sigmoid(),
+        }
+        
+        self.final_activations = {
+            'tanh': nn.Tanh(),
+            'sigmoid': nn.Sigmoid(),
+            'none': nn.Identity(),
+        }
+        
+        # Validate activation choice
+        if activation not in self.activations:
+            raise ValueError(f"Invalid activation function: '{activation}'. "
+                            f"Available options: {list(self.activations.keys())}")
+            
+        # Validate final activation choice
+        if final_activation not in self.final_activations:
+            raise ValueError(f"Invalid final activation function: '{final_activation}'. "
+                            f"Available options: {list(self.final_activations.keys())}")
         
         self.latent_dim = latent_dim
         
@@ -98,8 +125,9 @@ class ConvDecoder(BaseDecoder):
         # Reverse hidden_dims to go from smallest (latent) to largest (image)
         hidden_dims.reverse()
         
-        # Activation function
-        activation = nn.LeakyReLU(0.2) if use_leaky_relu else nn.ReLU()
+        # Get the selected activation functions
+        activation_fn = self.activations[activation]
+        final_activation_fn = self.final_activations[final_activation]
         
         # Initial linear projection from latent space to spatial dimensions
         self.decoder_input = nn.Linear(latent_dim, hidden_dims[0] * init_size[0] * init_size[1])
@@ -117,14 +145,12 @@ class ConvDecoder(BaseDecoder):
                                        padding=1,
                                        output_padding=1),
                     nn.BatchNorm2d(hidden_dims[i + 1]) if use_batch_norm else nn.Identity(),
-                    activation,
+                    activation_fn,
                     nn.Dropout(dropout_rate) if dropout_rate > 0 else nn.Identity()
                 )
             )
         
         # Final output layer
-        final_activation = nn.Tanh() if use_tanh else nn.Sigmoid()
-        
         self.final_layer = nn.Sequential(
             nn.ConvTranspose2d(hidden_dims[-1],
                                hidden_dims[-1],
@@ -133,9 +159,9 @@ class ConvDecoder(BaseDecoder):
                                padding=1,
                                output_padding=1),
             nn.BatchNorm2d(hidden_dims[-1]) if use_batch_norm else nn.Identity(),
-            activation,
+            activation_fn,
             nn.Conv2d(hidden_dims[-1], out_channels=output_channels, kernel_size=3, padding=1),
-            final_activation
+            final_activation_fn
         )
         
         # Add upsampling layer if needed to match exact output dimensions
