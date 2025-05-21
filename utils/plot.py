@@ -6,6 +6,7 @@ from matplotlib.patches import Ellipse
 from sklearn.decomposition import PCA, KernelPCA
 from sklearn.manifold import TSNE
 from umap import UMAP
+import torch
 
 class LatentSpaceVisualizer:
     """
@@ -313,6 +314,10 @@ class LatentSpaceVisualizer:
         if title is None:
             title = f"Latent Space - {method.upper()}"
         
+        # Add epoch to title if provided
+        if 'epoch' in kwargs and kwargs['epoch'] is not None:
+            title = f"Epoch {kwargs['epoch']} - {title}"
+        
         # Create figure
         fig, axes = self._setup_figure(title, include_gmm_samples)
         
@@ -458,3 +463,292 @@ class LatentSpaceVisualizer:
         plt.show()
         
         return fig
+    
+
+
+def plot_training_losses(train_losses, test_losses, recon_train_losses, recon_test_losses, 
+                         gmm_train_losses, gmm_test_losses, title=None):
+    """
+    Plot training and test losses side by side for each loss type.
+    
+    Parameters
+    ----------
+    train_losses : list
+        Total loss values for training data
+    test_losses : list
+        Total loss values for test data
+    recon_train_losses : list
+        Reconstruction loss values for training data
+    recon_test_losses : list
+        Reconstruction loss values for test data
+    gmm_train_losses : list
+        GMM error values for training data
+    gmm_test_losses : list
+        GMM error values for test data
+    title : str, optional
+        Custom title for the plot
+    """
+    fig, axes = plt.subplots(1, 3, figsize=(20, 6))
+    epochs = range(1, len(train_losses) + 1)
+    
+    # Plot 1: Reconstruction Loss
+    ax = axes[0]
+    ax.plot(epochs, recon_train_losses, 'b-', linewidth=2, label='Train')
+    ax.plot(epochs, recon_test_losses, 'r-', linewidth=2, label='Test')
+    
+    ax.set_title('Reconstruction Loss', fontsize=14)
+    ax.set_xlabel('Epoch', fontsize=12)
+    ax.set_ylabel('Loss', fontsize=12)
+    ax.grid(alpha=0.3)
+    ax.legend(fontsize=12)
+    
+    # Plot 2: GMM Error
+    ax = axes[1]
+    ax.plot(epochs, gmm_train_losses, 'b-', linewidth=2, label='Train')
+    ax.plot(epochs, gmm_test_losses, 'r-', linewidth=2, label='Test')
+    
+    ax.set_title('GMM Error', fontsize=14)
+    ax.set_xlabel('Epoch', fontsize=12)
+    ax.set_ylabel('Error', fontsize=12)
+    ax.grid(alpha=0.3)
+    ax.legend(fontsize=12)
+    
+    # Plot 3: Total Loss
+    ax = axes[2]
+    ax.plot(epochs, train_losses, 'b-', linewidth=2, label='Train')
+    ax.plot(epochs, test_losses, 'r-', linewidth=2, label='Test')
+    
+    ax.set_title('Total Loss', fontsize=14)
+    ax.set_xlabel('Epoch', fontsize=12)
+    ax.set_ylabel('Loss', fontsize=12)
+    ax.grid(alpha=0.3)
+    ax.legend(fontsize=12)
+    
+    # Add main title if provided
+    if title:
+        fig.suptitle(title, fontsize=16, y=0.98)
+    
+    plt.tight_layout()
+    plt.show()
+    
+    return fig
+
+
+def plot_images(images, labels, title, epoch=None, cmap='viridis'):
+    """
+    Plots a grid of images with 2 images for each label stacked on top of each other,
+    and the label displayed at the bottom of the second row.
+
+    Parameters
+    ----------
+    images : torch.Tensor
+        Tensor of images to plot.
+    labels : torch.Tensor
+        Tensor of labels corresponding to the images.
+    title : str
+        Title for the plot.
+    epoch : int
+        Epoch number to include in the title.
+    cmap : str, optional
+        Colormap to use for the images (default is 'viridis').
+    """
+    # Map numeric labels to item types
+    label_map = {
+        0: "T-shirt/top",
+        1: "Trouser",
+        2: "Pullover",
+        3: "Dress",
+        4: "Coat",
+        5: "Sandal",
+        6: "Shirt",
+        7: "Sneaker",
+        8: "Bag",
+        9: "Ankle boot"
+    }
+
+    # Group images by labels
+    grouped_images = {label: [] for label in range(10)}
+    for img, label in zip(images, labels):
+        if len(grouped_images[label.item()]) < 2:  # Select only 2 images per label
+            grouped_images[label.item()].append(img)
+
+    # Flatten the grouped images and labels
+    stacked_images = []
+    stacked_labels = []
+    for label, imgs in grouped_images.items():
+        if len(imgs) == 2:  # Ensure we have exactly 2 images per label
+            stacked_images.extend(imgs)
+            stacked_labels.append(label_map[label])  # Add label once per column
+
+    print(f"Plotting {len(stacked_images)} images.")
+    n_labels = len(stacked_labels)
+    if n_labels == 0:
+        print("No images to plot.")
+        return
+
+    n_cols = n_labels  # One column per label
+    n_rows = 2  # Two rows per label (stacked images)
+
+    # Create subplots
+    fig, axes = plt.subplots(n_rows, n_cols, figsize=(n_cols * 1.5, n_rows * 1.5))
+
+    for col, label in enumerate(stacked_labels):
+        for row in range(n_rows):
+            ax = axes[row, col]
+            img = stacked_images[col * n_rows + row].squeeze()
+            ax.imshow(img, cmap=cmap, interpolation='nearest')
+            ax.axis('off')
+        # Add label below the second row
+        axes[1, col].text(
+            0.5, -0.2, label, fontsize=12, ha='center', va='top', transform=axes[1, col].transAxes
+        )
+    if epoch is not None:
+        title = f'Epoch {epoch} - {title}'
+    else:
+        title = f'{title}'
+    plt.suptitle(title)
+    plt.tight_layout()
+    plt.show()
+
+
+def plot_gmm_images(model, gmm, title, epoch=None, cmap='viridis', top_n=10, device='cuda'):
+    """
+    Plots reconstructions of the GMM means with the largest mixing coefficients.
+    
+    Parameters
+    ----------
+    model : torch.nn.Module
+        Decoder model
+    gmm : GaussianMixture
+        Fitted GMM model
+    title : str
+        Plot title
+    epoch : int, optional
+        Current epoch number for title
+    cmap : str, optional
+        Colormap to use for images
+    top_n : int, optional
+        Number of top components to show (by weight)
+    device : str, optional
+        Device to use for tensor operations
+    """
+    with torch.no_grad():
+        # Get weights and means from GMM
+        weights = gmm.weights_.detach().cpu()
+        means = gmm.means_.detach()
+        
+        # Sort indices by weights (descending)
+        sorted_indices = torch.argsort(weights, descending=True)
+        
+        # Take top N components
+        top_indices = sorted_indices[:top_n]
+        top_weights = weights[top_indices]
+        top_means = means[top_indices]
+        
+        # Generate reconstructions
+        reconstructions = model(top_means)
+        reconstructions = reconstructions.cpu()
+        
+        # Create a figure with top_n columns and 1 row
+        n_cols = min(5, top_n)  # Limit to 5 columns per row for readability
+        n_rows = (top_n + n_cols - 1) // n_cols  # Ceiling division for number of rows
+        
+        fig, axes = plt.subplots(n_rows, n_cols, figsize=(n_cols * 2, n_rows * 2))
+        
+        # Handle single row/column case
+        if n_rows == 1 and n_cols == 1:
+            axes = np.array([[axes]])
+        elif n_rows == 1:
+            axes = np.array([axes])
+        elif n_cols == 1:
+            axes = np.array([[ax] for ax in axes])
+        
+        # Plot each component
+        for i in range(top_n):
+            row, col = i // n_cols, i % n_cols
+            ax = axes[row][col]
+            img = reconstructions[i].squeeze()
+            ax.imshow(img, cmap=cmap, interpolation='nearest')
+            
+            # Format weight as percentage
+            weight_pct = top_weights[i].item() * 100
+            ax.set_title(f"Weight: {weight_pct:.1f}%")
+            ax.axis('off')
+        
+        # Hide unused subplots
+        for i in range(top_n, n_rows * n_cols):
+            row, col = i // n_cols, i % n_cols
+            axes[row][col].axis('off')
+        
+        if epoch is not None:
+            plt.suptitle(f'Epoch {epoch} - {title}')
+        else:
+            plt.suptitle(title)
+            
+        plt.tight_layout()
+        plt.show()
+
+def plot_gmm_samples(model, gmm, title, n_samples=20, epoch=None, cmap='viridis', device='cuda'):
+    """
+    Plots images generated from random samples drawn from the GMM distribution.
+    
+    Parameters
+    ----------
+    model : torch.nn.Module
+        Decoder model
+    gmm : GaussianMixture
+        Fitted GMM model
+    title : str
+        Plot title
+    n_samples : int
+        Number of samples to generate and display
+    epoch : int, optional
+        Current epoch number for title
+    cmap : str, optional
+        Colormap to use for images
+    device : str, optional
+        Device to use for tensor operations
+    """
+    with torch.no_grad():
+        # Sample from the GMM
+        samples, _ = gmm.sample(n_samples)  # Returns samples and their component labels
+        
+        # Generate images from the samples
+        generated_images = model(samples)
+        generated_images = generated_images.cpu()
+        
+        # Create a grid layout for displaying the images
+        n_cols = min(5, n_samples)  # Max 5 columns
+        n_rows = (n_samples + n_cols - 1) // n_cols
+        
+        fig, axes = plt.subplots(n_rows, n_cols, figsize=(n_cols * 2, n_rows * 2))
+        
+        # Handle single row/column case
+        if n_rows == 1 and n_cols == 1:
+            axes = np.array([[axes]])
+        elif n_rows == 1:
+            axes = np.array([axes])
+        elif n_cols == 1:
+            axes = np.array([[ax] for ax in axes])
+        
+        # Plot each generated image
+        for i in range(n_samples):
+            row, col = i // n_cols, i % n_cols
+            ax = axes[row][col]
+            img = generated_images[i].squeeze()
+            ax.imshow(img, cmap=cmap, interpolation='nearest')
+            ax.set_title(f"Sample {i+1}")
+            ax.axis('off')
+        
+        # Hide unused subplots
+        for i in range(n_samples, n_rows * n_cols):
+            row, col = i // n_cols, i % n_cols
+            axes[row][col].axis('off')
+        
+        if epoch is not None:
+            plt.suptitle(f'Epoch {epoch} - {title}')
+        else:
+            plt.suptitle(title)
+            
+        plt.tight_layout()
+        plt.show()
