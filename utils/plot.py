@@ -1,5 +1,3 @@
-import math
-from abc import ABC, abstractmethod
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.patches import Ellipse
@@ -286,8 +284,8 @@ class LatentSpaceVisualizer:
 
         
     def visualize(self, z_train, labels_train, z_test, labels_test, gmm, 
-                  method='pca', title=None, label_names=None, random_state=42, 
-                  **kwargs):
+                method='pca', title=None, label_names=None, random_state=None, 
+                **kwargs):
         """
         Visualize latent space with the specified dimensionality reduction technique.
         
@@ -305,14 +303,14 @@ class LatentSpaceVisualizer:
             Main title for the plot (defaults based on method)
         label_names : list, optional
             Names for the class labels
-        random_state : int
-            Random seed for reproducibility
+        random_state : int, optional
+            Random seed for reproducibility (if None, results will vary between runs)
         **kwargs : dict
             Additional parameters for specific methods:
             - PCA: None
             - UMAP: 'n_neighbors', 'min_dist', etc.
             - Kernel PCA: 'kernel', 'gamma'
-            - t-SNE: 'perplexity', 'n_iter'
+            - t-SNE: 'perplexity', 'max_iter'
             
         Returns
         -------
@@ -372,8 +370,12 @@ class LatentSpaceVisualizer:
         
         # Apply dimensionality reduction based on the specified method
         if method.lower() == 'pca':
-            # PCA
-            pca = PCA(n_components=2, random_state=random_state)
+            # PCA - only set random_state if explicitly provided
+            pca_kwargs = {'n_components': 2}
+            if random_state is not None:
+                pca_kwargs['random_state'] = random_state
+                
+            pca = PCA(**pca_kwargs)
             pca.fit(z_all)
             
             z_train_reduced = pca.transform(z_train_np)
@@ -386,9 +388,9 @@ class LatentSpaceVisualizer:
             
             # Plot data points and means
             self._plot_points_and_means(axes[0], z_train_reduced, labels_train_np, 
-                                      means_reduced, label_names, "Training", x_label, y_label)
+                                    means_reduced, label_names, "Training", x_label, y_label)
             self._plot_points_and_means(axes[1], z_test_reduced, labels_test_np, 
-                                      means_reduced, label_names, "Testing", x_label, y_label)
+                                    means_reduced, label_names, "Testing", x_label, y_label)
             
             # Add ellipses for covariance
             if covariances is not None:
@@ -398,43 +400,19 @@ class LatentSpaceVisualizer:
             # Add GMM samples if available
             if include_gmm_samples and gmm_samples is not None:
                 self._plot_gmm_samples(axes[2], gmm_samples, means_reduced, label_names, 
-                                     pca.transform, x_label, y_label)
-                
-        elif method.lower() == 'umap':
-            # UMAP
-            umap_kwargs = {k: v for k, v in kwargs.items() 
-                          if k in ['n_neighbors', 'min_dist', 'metric', 'n_components']}
-            umap_kwargs.setdefault('n_components', 2)
-            umap_kwargs.setdefault('random_state', random_state)
-            
-            reducer = UMAP(**umap_kwargs)
-            z_all_reduced = reducer.fit_transform(z_all)
-            
-            z_train_reduced = z_all_reduced[:split]
-            z_test_reduced = z_all_reduced[split:]
-            means_reduced = reducer.transform(means)
-            
-            # Labels for axes
-            x_label = "UMAP Dimension 1"
-            y_label = "UMAP Dimension 2"
-            
-            # Plot data points and means
-            self._plot_points_and_means(axes[0], z_train_reduced, labels_train_np, 
-                                      means_reduced, label_names, "Training", x_label, y_label)
-            self._plot_points_and_means(axes[1], z_test_reduced, labels_test_np, 
-                                      means_reduced, label_names, "Testing", x_label, y_label)
-            
-            # Add GMM samples if available
-            if include_gmm_samples and gmm_samples is not None:
-                self._plot_gmm_samples(axes[2], gmm_samples, means_reduced, label_names, 
-                                     reducer.transform, x_label, y_label)
+                                    pca.transform, x_label, y_label)
                 
         elif method.lower() == 'kpca':
             # Kernel PCA
             kernel = kwargs.get('kernel', 'rbf')
             gamma = kwargs.get('gamma', None)
             
-            kpca = KernelPCA(n_components=2, kernel=kernel, gamma=gamma, random_state=random_state)
+            # Only set random_state if explicitly provided
+            kpca_kwargs = {'n_components': 2, 'kernel': kernel, 'gamma': gamma}
+            if random_state is not None:
+                kpca_kwargs['random_state'] = random_state
+                
+            kpca = KernelPCA(**kpca_kwargs)
             kpca.fit(z_all)
             
             z_train_reduced = kpca.transform(z_train_np)
@@ -447,22 +425,26 @@ class LatentSpaceVisualizer:
             
             # Plot data points and means
             self._plot_points_and_means(axes[0], z_train_reduced, labels_train_np, 
-                                      means_reduced, label_names, "Training", x_label, y_label)
+                                    means_reduced, label_names, "Training", x_label, y_label)
             self._plot_points_and_means(axes[1], z_test_reduced, labels_test_np, 
-                                      means_reduced, label_names, "Testing", x_label, y_label)
+                                    means_reduced, label_names, "Testing", x_label, y_label)
             
             # Add GMM samples if available
             if include_gmm_samples and gmm_samples is not None:
                 self._plot_gmm_samples(axes[2], gmm_samples, means_reduced, label_names, 
-                                     kpca.transform, x_label, y_label)
+                                    kpca.transform, x_label, y_label)
                 
         elif method.lower() == 'tsne':
             # t-SNE
             perplexity = kwargs.get('perplexity', 30)
-            n_iter = kwargs.get('n_iter', 1000)
+            max_iter = kwargs.get('max_iter', 1000)
             
-            tsne = TSNE(n_components=2, perplexity=perplexity, n_iter=n_iter, 
-                       random_state=random_state)
+            # Only set random_state if explicitly provided
+            tsne_kwargs = {'n_components': 2, 'perplexity': perplexity, 'max_iter': max_iter}
+            if random_state is not None:
+                tsne_kwargs['random_state'] = random_state
+                
+            tsne = TSNE(**tsne_kwargs)
             z_all_reduced = tsne.fit_transform(z_all)
             
             z_train_reduced = z_all_reduced[:split]
@@ -483,9 +465,9 @@ class LatentSpaceVisualizer:
             
             # Plot data points and means
             self._plot_points_and_means(axes[0], z_train_reduced, labels_train_np, 
-                                      means_reduced, label_names, "Training", x_label, y_label)
+                                    means_reduced, label_names, "Training", x_label, y_label)
             self._plot_points_and_means(axes[1], z_test_reduced, labels_test_np, 
-                                      means_reduced, label_names, "Testing", x_label, y_label)
+                                    means_reduced, label_names, "Testing", x_label, y_label)
             
             # For t-SNE, we need a special approach for GMM samples since t-SNE doesn't have transform
             if include_gmm_samples and gmm_samples is not None:
@@ -502,10 +484,45 @@ class LatentSpaceVisualizer:
                     return samples_reduced
                 
                 self._plot_gmm_samples(axes[2], gmm_samples, means_reduced, label_names, 
-                                     tsne_proxy_transform, x_label, y_label)
-        
+                                    tsne_proxy_transform, x_label, y_label)
+                
+        elif method.lower() == 'umap':
+            # UMAP
+            umap_kwargs = {k: v for k, v in kwargs.items() 
+                        if k in ['n_neighbors', 'min_dist', 'metric', 'n_components']}
+            umap_kwargs.setdefault('n_components', 2)
+            # Only set random_state if explicitly provided
+            if random_state is not None:
+                umap_kwargs['random_state'] = random_state
+            
+            reducer = UMAP(**umap_kwargs)
+            z_all_reduced = reducer.fit_transform(z_all)
+            
+            z_train_reduced = z_all_reduced[:split]
+            z_test_reduced = z_all_reduced[split:]
+            means_reduced = reducer.transform(means)
+            
+            # Labels for axes
+            x_label = "UMAP Dimension 1"
+            y_label = "UMAP Dimension 2"
+            
+            # Plot data points and means
+            self._plot_points_and_means(axes[0], z_train_reduced, labels_train_np, 
+                                    means_reduced, label_names, "Training", x_label, y_label)
+            self._plot_points_and_means(axes[1], z_test_reduced, labels_test_np, 
+                                    means_reduced, label_names, "Testing", x_label, y_label)
+            
+            # Add GMM samples if available
+            if include_gmm_samples and gmm_samples is not None:
+                self._plot_gmm_samples(axes[2], gmm_samples, means_reduced, label_names, 
+                                    reducer.transform, x_label, y_label)
+                
+
+                
+        # Handle unknown method
         else:
-            raise ValueError(f"Unknown method: {method}. Choose from 'pca', 'umap', 'kpca', or 'tsne'.")
+            raise ValueError(f"Unknown method: {method}. Choose from 'pca', 'umap', "
+                             f"'kpca', 'tsne'.")
         
         # Finalize and show the plot
         self._finalize_plot(fig, axes)

@@ -755,106 +755,6 @@ class RepresentationLayer(nn.Module):
         rep_layer = cls(values=state_dict['z'], device=device)
         return rep_layer
     
-    def regularization_loss(self, l1_weight: float = 0.0, 
-                            l2_weight: float = 0.0) -> Tensor:
-        """Calculate regularization loss for the representations.
-        
-        Parameters
-        ----------
-        l1_weight : float, default=0.0
-            Weight for L1 regularization.
-            
-        l2_weight : float, default=0.0
-            Weight for L2 regularization.
-            
-        Returns
-        -------
-        loss : Tensor
-            The calculated regularization loss.
-        """
-        loss = torch.tensor(0.0, device=self.device)
-        
-        if l1_weight > 0:
-            loss += l1_weight * torch.sum(torch.abs(self.z))
-            
-        if l2_weight > 0:
-            loss += l2_weight * torch.sum(self.z ** 2)
-            
-        return loss
-    
-    def interpolate(self, idx1: int, idx2: int, steps: int = 10) -> Tensor:
-        """Interpolate between two representations.
-        
-        Parameters
-        ----------
-        idx1 : int
-            Index of the first representation.
-            
-        idx2 : int
-            Index of the second representation.
-            
-        steps : int, default=10
-            Number of interpolation steps.
-            
-        Returns
-        -------
-        interpolations : Tensor
-            Tensor containing the interpolation steps.
-        """
-        start = self.z[idx1].detach()
-        end = self.z[idx2].detach()
-        
-        alphas = torch.linspace(0, 1, steps, device=self.device)
-        interpolations = []
-        
-        for alpha in alphas:
-            interp = (1 - alpha) * start + alpha * end
-            interpolations.append(interp)
-            
-        return torch.stack(interpolations)
-    
-    def mean_representation(self, indices: Union[List[int], Tensor]) -> Tensor:
-        """Compute mean representation for given indices.
-        
-        Parameters
-        ----------
-        indices : list or Tensor
-            Indices of the representations to average.
-            
-        Returns
-        -------
-        mean_rep : Tensor
-            Mean representation.
-        """
-        return torch.mean(self.z[indices], dim=0, keepdim=True)
-    
-    def compute_statistics(self) -> Dict[str, Union[Tensor, float]]:
-        """Compute basic statistics of representations.
-        
-        Returns
-        -------
-        stats : dict
-            Dictionary containing the statistics.
-        """
-        with torch.no_grad():
-            mean = torch.mean(self.z, dim=0)
-            std = torch.std(self.z, dim=0)
-            min_vals = torch.min(self.z, dim=0).values
-            max_vals = torch.max(self.z, dim=0).values
-            norms = torch.norm(self.z, dim=1)
-            norm_mean = norms.mean().item()
-            norm_std = norms.std().item()
-        
-        return {
-            "mean": mean,
-            "std": std,
-            "min": min_vals,
-            "max": max_vals,
-            "norm_mean": norm_mean,
-            "norm_std": norm_std
-        }
-    
-
     @classmethod
     def initialize_from_pca(cls, data: Tensor, n_components: Optional[int] = None, 
                             device: Optional[Union[str, torch.device]] = None) -> 'RepresentationLayer':
@@ -899,86 +799,21 @@ class RepresentationLayer(nn.Module):
         # Create representation layer
         return cls(values=transformed_data, device=device)
 
-    @classmethod
-    def with_optimal_dim(cls, data: Tensor, min_dim: int = 2, max_dim: int = 100, 
-                        criterion: str = 'explained_variance',
-                        threshold: float = 0.95,
-                        device: Optional[Union[str, torch.device]] = None) -> 'RepresentationLayer':
-        """Create representation layer with automatically selected dimension.
-        
-        Parameters
-        ----------
-        data : Tensor
-            The data to use for dimension selection.
-            
-        min_dim : int, default=2
-            Minimum dimension to consider.
-            
-        max_dim : int, default=100
-            Maximum dimension to consider.
-            
-        criterion : str, default='explained_variance'
-            Criterion to use for selecting dimension.
-            Options: 'explained_variance', 'elbow'
-            
-        threshold : float, default=0.95
-            Threshold for explained variance criterion (between 0 and 1).
-            
-        device : str or torch.device, optional
-            Device to place the representations on.
-            
-        Returns
-        -------
-        rep_layer : RepresentationLayer
-            The initialized representation layer.
-        """
-        # Ensure data is a 2D tensor
-        if isinstance(data, torch.Tensor):
-            if len(data.shape) > 2:
-                n_samples = data.shape[0]
-                data = data.reshape(n_samples, -1)
-        else:
-            raise TypeError("Data must be a torch.Tensor")
-        
-        # Determine device
-        if device is None:
-            device = data.device
-            
-        # Apply PCA with the maximum number of components
-        max_components = min(min(data.shape), max_dim)
-        pca = TorchPCA(n_components=max_components)
-        pca.fit(data)
-        
-        # Select optimal dimension based on criterion
-        if criterion == 'explained_variance':
-            # Find dimension where cumulative explained variance exceeds threshold
-            cum_variance = torch.cumsum(pca.explained_variance_ratio_, dim=0)
-            optimal_dim = torch.searchsorted(cum_variance, threshold).item() + 1
-            optimal_dim = max(min_dim, min(optimal_dim, max_dim))
-        
-        elif criterion == 'elbow':
-            # Use the elbow method (find where second derivative is maximized)
-            explained_variance = pca.explained_variance_
-            if len(explained_variance) > 2:
-                # Calculate first differences
-                d1 = explained_variance[:-1] - explained_variance[1:]
-                # Calculate second differences
-                d2 = d1[:-1] - d1[1:]
-                # Find the elbow point
-                optimal_dim = torch.argmax(d2).item() + 1
-                optimal_dim = max(min_dim, min(optimal_dim, max_dim))
-            else:
-                optimal_dim = min_dim
-        
-        else:
-            raise ValueError(f"Unknown criterion: {criterion}. Use 'explained_variance' or 'elbow'")
-        
-        # Apply PCA with the optimal dimension
-        transformed_data = pca.transform(data)[:, :optimal_dim]
-        
-        # Create representation layer
-        return cls(values=transformed_data, device=device)
-    
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
