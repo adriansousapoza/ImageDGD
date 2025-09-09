@@ -1,5 +1,11 @@
-# Ignore data folder
+# Data directories
 data/
+outputs/
+logs/
+figures/
+figures_*/
+mlruns/
+.mlflow/
 
 # Python
 __pycache__/
@@ -7,7 +13,6 @@ __pycache__/
 *$py.class
 *.so
 .Python
-env/
 build/
 develop-eggs/
 dist/
@@ -54,3 +59,24 @@ Thumbs.db
 
 # Jupyter Notebook
 .ipynb_checkpoints
+
+# pytest
+.pytest_cache/
+.coverage
+htmlcov/
+
+# mypy
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# Hydra
+outputs/
+.hydra/
+
+# MLflow
+mlruns/
+mlartifacts/
+
+# Optuna
+optuna_studies/

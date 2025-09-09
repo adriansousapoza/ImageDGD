@@ -1,0 +1,27 @@
+defaults:
+  - data: weak_gpu
+  - model: weak_gpu
+  - training: weak_gpu
+  - _self_
+
+# Global configuration for weak GPU training
+random_seed: 42
+device: "auto"
+
+# Runtime options
+verbose: true  # Enable detailed output
+use_subset: true  # Use data subset
+subset_fraction: 0.1  # 10% of data
+max_epochs: 50  # Limit epochs
+plot_interval: 10  # Plot every 10 epochs
+save_figures: false  # Disable to save time/memory
+
+# MLflow settings (simplified)
+mlflow:
+  tracking_uri: "./mlruns"
+  experiment_name: "weak_gpu_experiment"
+  run_name: "weak_gpu_run"
+  tags:
+    model_type: "DGD"
+    dataset: "FashionMNIST"
+    mode: "weak_gpu"
