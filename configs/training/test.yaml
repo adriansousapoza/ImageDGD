@@ -1,0 +1,38 @@
+# @package _global_
+
+# Quick test training configuration with minimal epochs
+training:
+  epochs: 2  # Just 2 epochs for testing
+  first_epoch_gmm: 1  # Start GMM early
+  refit_gmm_interval: 1  # Refit every epoch
+  lambda_gmm: 1.0
+  
+  optimizer:
+    decoder:
+      type: AdamW
+      lr: 0.001
+      weight_decay: 0.01
+    representation:
+      type: AdamW
+      lr: 0.01
+      weight_decay: 0.01
+      
+  scheduler:
+    type: CosineAnnealingLR
+    T_max: 2
+    eta_min: 1e-6
+    
+  early_stopping:
+    enabled: false
+    
+  checkpointing:
+    enabled: false  # Disable checkpointing for quick test
+    
+  logging:
+    log_interval: 1  # Log every batch for debugging
+    plot_interval: 1
+    save_figures: false  # Don't save figures for quick test
+    
+  validation:
+    enabled: true
+    interval: 1

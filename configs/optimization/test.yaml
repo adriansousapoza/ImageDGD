@@ -1,0 +1,38 @@
+# @package _global_
+
+# Quick test optimization configuration
+optimization:
+  enabled: true
+  study_name: dgd_test_optimization
+  storage: sqlite:///optuna_studies/dgd_test_study.db
+  direction: minimize
+  n_trials: 2  # Just 2 trials for testing
+  timeout: null
+  
+  pruner:
+    type: MedianPruner
+    n_startup_trials: 1
+    n_warmup_steps: 5
+    interval_steps: 5
+    
+  sampler:
+    type: TPESampler
+    n_startup_trials: 1
+    
+  objective:
+    metric: val_total_loss
+    direction: minimize
+    
+  parameters:
+    model.representation.n_features:
+      type: int
+      low: 3
+      high: 5  # Narrow range for quick test
+    model.representation.radius:
+      type: float
+      low: 0.1
+      high: 0.5
+    model.decoder.dropout_rate:
+      type: float
+      low: 0.0
+      high: 0.2
