@@ -1,0 +1,213 @@
+# Detailed configuration with extensive customization options
+# This configuration demonstrates all available parameters and advanced options
+
+# General settings
+random_seed: 42
+experiment_name: "ImageDGD_Detailed_Experiment"
+description: "Detailed configuration showcasing all available parameters and advanced features"
+
+# Data configuration
+data:
+  dataset: "FashionMNIST"  # Options: "FashionMNIST", "MNIST", "CIFAR10"
+  data_dir: "./data"
+  batch_size: 64  # Smaller batch size for fine-grained training
+  num_workers: 8  # More workers for data loading
+  pin_memory: true
+  use_subset: false
+  subset_fraction: 1.0
+  normalize: true
+  # Additional data augmentation parameters (if implemented)
+  augmentation:
+    enabled: false
+    rotation: 15
+    translation: 0.1
+    scale: 0.1
+    horizontal_flip: false
+
+# Model configuration
+model:
+  # Representation layer configuration with advanced distribution parameters
+  representation:
+    n_features: 64  # Higher dimensional latent space
+    distribution: "beta"  # More complex distribution
+    # Beta distribution parameters
+    alpha: 2.0
+    beta: 5.0
+    # Alternative distribution parameters (for other distributions)
+    # uniform:
+    #   radius: 1.0
+    # normal:
+    #   mean: 0.0
+    #   scale: 1.0
+    # gamma:
+    #   alpha: 2.0
+    #   beta: 1.0
+  
+  # Advanced decoder configuration
+  decoder:
+    hidden_dims: [1024, 512, 256, 128, 64, 32]  # Deep architecture
+    output_channels: 1
+    output_size: [28, 28]
+    init_size: [3, 3]  # Small initial size for more upsampling
+    kernel_size: 4  # Larger kernels
+    stride: 2
+    padding: 1
+    output_padding: 1
+    bias: false  # No bias when using normalization
+    normalization: "group"  # Group normalization
+    use_batch_norm: false  # Use normalization parameter instead
+    activation: "gelu"  # Modern activation function
+    final_activation: "sigmoid"
+    dropout_rate: 0.1  # Light dropout for regularization
+    upsampling_mode: "bilinear"  # High-quality upsampling
+    use_spectral_norm: true  # Spectral normalization for stability
+    use_self_attention: true  # Self-attention for better quality
+    attention_resolution: 16  # Apply attention at 16x16 resolution
+    
+    # Advanced parameters
+    weight_init: "xavier_uniform"  # Weight initialization
+    bias_init: "zeros"
+    gradient_clipping: 1.0  # Gradient clipping value
+  
+  # Advanced GMM configuration
+  gmm:
+    n_components: 20  # More components for complex distributions
+    covariance_type: "full"  # Full covariance matrices
+    init_params: "kmeans"  # K-means initialization
+    verbose: true  # Verbose output for debugging
+    max_iter: 2000  # More iterations for convergence
+    tol: 1e-4  # Tighter tolerance
+    n_init: 5  # Multiple initializations
+    warm_start: true
+    
+    # Advanced GMM parameters
+    reg_covar: 1e-6  # Regularization for covariance
+    means_init: null  # Custom mean initialization
+    precisions_init: null  # Custom precision initialization
+    weights_init: null  # Custom weight initialization
+
+# Advanced training configuration
+training:
+  epochs: 500  # Long training
+  device: "auto"
+  
+  # Advanced GMM training schedule
+  first_epoch_gmm: 100  # Wait longer before GMM
+  refit_gmm_interval: 50  # Regular refitting
+  lambda_gmm: 2.0  # Strong GMM influence
+  gmm_annealing:
+    enabled: true
+    start_weight: 0.1
+    end_weight: 2.0
+    annealing_epochs: 200
+  
+  # Advanced optimizer configuration with different optimizers for components
+  optimizer:
+    decoder:
+      type: "AdamW"
+      lr: 0.0005  # Conservative learning rate
+      weight_decay: 0.01
+      betas: [0.9, 0.999]
+      eps: 1e-8
+      amsgrad: false
+      # Learning rate scheduling
+      lr_scheduler:
+        enabled: true
+        type: "cosine_annealing"
+        T_max: 500
+        eta_min: 1e-6
+    representation:
+      type: "Lion"  # Advanced optimizer for representations
+      lr: 0.001  # Lion typically uses lower LR
+      weight_decay: 0.05
+      betas: [0.95, 0.98]
+      # Learning rate scheduling
+      lr_scheduler:
+        enabled: true
+        type: "exponential"
+        gamma: 0.995
+  
+  # Advanced training techniques
+  techniques:
+    gradient_accumulation: 1  # Number of steps to accumulate gradients
+    gradient_clipping: 1.0  # Global gradient clipping
+    ema:  # Exponential moving average
+      enabled: false
+      decay: 0.9999
+    early_stopping:
+      enabled: true
+      patience: 50
+      min_delta: 0.001
+      monitor: "test_loss"
+  
+  # Logging configuration
+  logging:
+    log_interval: 5  # Frequent logging
+    plot_interval: 25
+    save_figures: true
+    figure_format: "png"
+    dpi: 300  # High resolution figures
+    save_model_interval: 100  # Save model every N epochs
+    
+    # Advanced logging options
+    log_gradients: true
+    log_weights: false
+    log_activations: false
+    profile_memory: false
+
+# ClearML configuration
+clearml:
+  enabled: true
+  project_name: "ImageDGD_Research"
+  task_name: "Detailed_Advanced_Training"
+  tags: ["detailed", "advanced", "research", "full-features"]
+  
+  # Advanced ClearML options
+  auto_connect_arg_parser: true
+  auto_connect_frameworks: true
+  auto_connect_streams: true
+
+# Hardware configuration
+hardware:
+  mixed_precision: true  # Enable mixed precision training
+  compile_model: true  # PyTorch 2.0 model compilation
+  benchmark_cudnn: true
+  deterministic: false  # Set to true for reproducible results (slower)
+  
+  # Multi-GPU configuration (if available)
+  data_parallel: false
+  distributed:
+    enabled: false
+    backend: "nccl"
+    init_method: "env://"
+
+# Experiment tracking and analysis
+experiment:
+  # Hyperparameter sweeps
+  sweep:
+    enabled: false
+    parameters:
+      model.representation.n_features: [32, 64, 128]
+      training.optimizer.decoder.lr: [0.0001, 0.0005, 0.001]
+      model.gmm.n_components: [10, 20, 50]
+  
+  # Analysis and visualization
+  analysis:
+    latent_interpolation: true
+    reconstruction_quality: true
+    gmm_component_analysis: true
+    generate_samples: 100
+    
+# Environment and reproducibility
+environment:
+  python_hash_seed: 42
+  numpy_seed: 42
+  torch_seed: 42
+  cuda_deterministic: false
+  
+# Performance profiling
+profiling:
+  enabled: false
+  profile_epochs: [1, 50, 100]
+  profile_memory: true
+  profile_compute: true

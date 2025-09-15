@@ -1,0 +1,99 @@
+# Minimal configuration for fast testing and debugging
+# This configuration is optimized for speed and quick iterations
+
+# General settings
+random_seed: 42
+experiment_name: "ImageDGD_Minimal_Test"
+description: "Minimal configuration for fast testing and debugging"
+
+# Data configuration
+data:
+  dataset: "FashionMNIST"
+  data_dir: "./data"
+  batch_size: 512  # Larger batch size for faster training
+  num_workers: 2
+  pin_memory: true
+  use_subset: true  # Use only a subset of data
+  subset_fraction: 0.1  # Use only 10% of data
+  normalize: true
+
+# Model configuration
+model:
+  # Representation layer configuration
+  representation:
+    n_features: 8  # Small latent dimension for speed
+    distribution: "uniform"
+    radius: 1.0
+  
+  # Decoder configuration - simplified architecture
+  decoder:
+    hidden_dims: [64, 32]  # Much smaller network
+    output_channels: 1
+    output_size: [28, 28]
+    init_size: [7, 7]  # Larger initial size to reduce upsampling
+    kernel_size: 3
+    stride: 2
+    padding: 1
+    output_padding: 1
+    bias: true
+    normalization: "none"  # No normalization for speed
+    use_batch_norm: false
+    activation: "relu"  # Simple activation
+    final_activation: "sigmoid"
+    dropout_rate: 0.0
+    upsampling_mode: "nearest"  # Fastest upsampling
+    use_spectral_norm: false
+    use_self_attention: false
+  
+  # GMM configuration - minimal complexity
+  gmm:
+    n_components: 3  # Very few components
+    covariance_type: "diag"  # Simplest covariance type
+    init_params: "random"  # Faster initialization
+    verbose: false
+    max_iter: 50  # Few iterations
+    tol: 1e-2  # Looser tolerance
+    n_init: 1  # Single initialization
+    warm_start: true
+
+# Training configuration
+training:
+  epochs: 20  # Very few epochs for testing
+  device: "auto"
+  
+  # GMM training schedule
+  first_epoch_gmm: 5  # Start GMM early
+  refit_gmm_interval: 10  # Infrequent refitting
+  lambda_gmm: 0.1  # Lower weight on GMM loss
+  
+  # Optimizer configuration - aggressive learning rates
+  optimizer:
+    decoder:
+      type: "Adam"  # Standard Adam for simplicity
+      lr: 0.01  # Higher learning rate
+      weight_decay: 0.0
+    representation:
+      type: "Adam"
+      lr: 0.1  # Very high learning rate for representations
+      weight_decay: 0.0
+  
+  # Logging configuration
+  logging:
+    log_interval: 5  # Log frequently for debugging
+    plot_interval: 10  # Plot every 10 epochs
+    save_figures: true
+    figure_format: "png"
+    dpi: 72  # Low DPI for speed
+
+# ClearML configuration
+clearml:
+  enabled: false  # Disable for testing
+  project_name: "ImageDGD_Test"
+  task_name: "Minimal_Test"
+  tags: ["minimal", "test", "debug"]
+
+# Hardware configuration
+hardware:
+  mixed_precision: false
+  compile_model: false
+  benchmark_cudnn: false  # Disable for testing
