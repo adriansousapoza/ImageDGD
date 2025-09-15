@@ -4,8 +4,6 @@ outputs/
 logs/
 figures/
 figures_*/
-mlruns/
-.mlflow/
 
 # Python
 __pycache__/
@@ -74,9 +72,9 @@ dmypy.json
 outputs/
 .hydra/
 
-# MLflow
-mlruns/
-mlartifacts/
+# ClearML
+.clearml/
+.clearml.conf
 
 # Optuna
 optuna_studies/

@@ -4,7 +4,7 @@ Training utilities and trainer class for ImageDGD.
 
 import torch
 import torch.nn.functional as F
-import mlflow
+from clearml import Task
 import time
 from datetime import timedelta
 from typing import Dict, List, Tuple, Optional, Any
@@ -12,13 +12,28 @@ from omegaconf import DictConfig
 from tqdm import tqdm
 import numpy as np
 
+# Additional optimizers
+try:
+    from lion_pytorch import Lion
+    LION_AVAILABLE = True
+except ImportError:
+    LION_AVAILABLE = False
+    Lion = None
+
+try:
+    from sophia import SophiaG
+    SOPHIA_AVAILABLE = True
+except ImportError:
+    SOPHIA_AVAILABLE = False
+    SophiaG = None
+
 from ..models import RepresentationLayer, DGD, ConvDecoder, GaussianMixture
 from ..visualization import LatentSpaceVisualizer, plot_training_losses, plot_images, plot_gmm_images, plot_gmm_samples
 
 
 class DGDTrainer:
     """
-    Trainer class for DGD model with MLflow integration.
+    Trainer class for DGD model with ClearML integration.
     """
     
     def __init__(self, config: DictConfig, device: torch.device, verbose: bool = True):
@@ -35,6 +50,12 @@ class DGDTrainer:
         self.device = device
         self.training_config = config.training
         self.verbose = verbose
+        
+        # Initialize ClearML task
+        self.task = Task.current_task()
+        if self.task is None:
+            # If no task is already initialized, create one
+            self.task = Task.init(project_name="ImageDGD", task_name="DGD Training")
         
         # Initialize tracking lists
         self.train_losses = []
@@ -67,26 +88,30 @@ class DGDTrainer:
         nsample_test = len(test_loader.dataset)
         
         # Create representation layers
-        dist_options_train = {
-            "n_samples": nsample_train,
-            "dim": model_config.representation.n_features,
-            "radius": model_config.representation.radius,
-        }
-        dist_options_test = {
-            "n_samples": nsample_test,
-            "dim": model_config.representation.n_features,
-            "radius": model_config.representation.radius,
-        }
+        # Prepare distribution parameters based on the distribution type
+        dist_params = {}
+        if hasattr(model_config.representation, 'radius'):
+            dist_params['radius'] = model_config.representation.radius
+        
+        # Handle other potential distribution parameters
+        for param in ['mean', 'cov', 'low', 'high', 'loc', 'scale', 'scale_matrix', 
+                     'rate', 'df', 'mu', 'alpha', 'beta', 'delta']:
+            if hasattr(model_config.representation, param):
+                dist_params[param] = getattr(model_config.representation, param)
         
         rep = RepresentationLayer(
+            dim=model_config.representation.n_features,
+            n_samples=nsample_train,
             dist=model_config.representation.distribution,
-            dist_options=dist_options_train,
+            dist_params=dist_params,
             device=self.device
         )
         
         test_rep = RepresentationLayer(
+            dim=model_config.representation.n_features,
+            n_samples=nsample_test,
             dist=model_config.representation.distribution,
-            dist_options=dist_options_test,
+            dist_params=dist_params,
             device=self.device
         )
         
@@ -123,43 +148,105 @@ class DGDTrainer:
         
         return model, rep, test_rep, gmm
     
+    def _get_optimizer_class(self, optimizer_name: str):
+        """Get optimizer class by name with support for PyTorch, Lion, and Sophia optimizers."""
+        optimizer_name = optimizer_name.lower()
+        
+        # PyTorch optimizers
+        pytorch_optimizers = {
+            'adadelta': torch.optim.Adadelta,
+            'adafactor': torch.optim.Adafactor,
+            'adagrad': torch.optim.Adagrad,
+            'adam': torch.optim.Adam,
+            'adamw': torch.optim.AdamW,
+            'sparseadam': torch.optim.SparseAdam,
+            'adamax': torch.optim.Adamax,
+            'asgd': torch.optim.ASGD,
+            'lbfgs': torch.optim.LBFGS,
+            'nadam': torch.optim.NAdam,
+            'radam': torch.optim.RAdam,
+            'rmsprop': torch.optim.RMSprop,
+            'rprop': torch.optim.Rprop,
+            'sgd': torch.optim.SGD,
+        }
+        
+        # Additional optimizers
+        additional_optimizers = {}
+        if LION_AVAILABLE:
+            additional_optimizers['lion'] = Lion
+        if SOPHIA_AVAILABLE:
+            additional_optimizers['sophia'] = SophiaG
+            additional_optimizers['sophiag'] = SophiaG
+        
+        all_optimizers = {**pytorch_optimizers, **additional_optimizers}
+        
+        if optimizer_name in all_optimizers:
+            return all_optimizers[optimizer_name]
+        
+        # If not found, try to get from torch.optim dynamically
+        if hasattr(torch.optim, optimizer_name.upper()):
+            return getattr(torch.optim, optimizer_name.upper())
+        elif hasattr(torch.optim, optimizer_name.capitalize()):
+            return getattr(torch.optim, optimizer_name.capitalize())
+        
+        available_opts = list(all_optimizers.keys())
+        raise ValueError(f"Unknown optimizer '{optimizer_name}'. Available optimizers: {available_opts}")
+    
+    def _create_optimizer(self, optimizer_class, parameters, config):
+        """Create optimizer instance with proper parameter filtering."""
+        # Get optimizer signature to filter supported parameters
+        import inspect
+        sig = inspect.signature(optimizer_class.__init__)
+        supported_params = set(sig.parameters.keys()) - {'self', 'params'}
+        
+        # Filter config to only include supported parameters
+        filtered_config = {}
+        for key, value in config.items():
+            if key == 'type':
+                continue
+            if key in supported_params:
+                filtered_config[key] = value
+            else:
+                print(f"Warning: Parameter '{key}' not supported by {optimizer_class.__name__}, ignoring.")
+        
+        return optimizer_class(parameters, **filtered_config)
+
     def _create_optimizers(self, model, rep, test_rep) -> List:
-        """Create optimizers based on configuration."""
+        """Create optimizers based on configuration with support for all PyTorch optimizers plus Lion and Sophia."""
         training_config = self.training_config
         
         # Decoder optimizer
         decoder_config = training_config.optimizer.decoder
-        if decoder_config.type == "AdamW":
-            decoder_optimizer = torch.optim.AdamW(
-                model.decoder.parameters(),
-                lr=decoder_config.lr,
-                weight_decay=decoder_config.weight_decay
-            )
-        else:
-            raise ValueError(f"Unknown optimizer type: {decoder_config.type}")
+        decoder_optimizer_class = self._get_optimizer_class(decoder_config.type)
+        decoder_optimizer = self._create_optimizer(
+            decoder_optimizer_class, 
+            model.decoder.parameters(), 
+            decoder_config
+        )
         
         # Representation optimizers
         rep_config = training_config.optimizer.representation
-        if rep_config.type == "AdamW":
-            trainrep_optimizer = torch.optim.AdamW(
-                rep.parameters(),
-                lr=rep_config.lr,
-                weight_decay=rep_config.weight_decay
-            )
-            testrep_optimizer = torch.optim.AdamW(
-                test_rep.parameters(),
-                lr=rep_config.lr,
-                weight_decay=rep_config.weight_decay
-            )
-        else:
-            raise ValueError(f"Unknown optimizer type: {rep_config.type}")
+        rep_optimizer_class = self._get_optimizer_class(rep_config.type)
+        
+        trainrep_optimizer = self._create_optimizer(
+            rep_optimizer_class,
+            rep.parameters(),
+            rep_config
+        )
+        
+        testrep_optimizer = self._create_optimizer(
+            rep_optimizer_class,
+            test_rep.parameters(),
+            rep_config
+        )
         
         return [decoder_optimizer, trainrep_optimizer, testrep_optimizer]
     
     def _log_metrics(self, epoch: int, metrics: Dict[str, float]):
-        """Log metrics to MLflow."""
+        """Log metrics to ClearML."""
+        logger = self.task.get_logger()
         for metric_name, value in metrics.items():
-            mlflow.log_metric(metric_name, value, step=epoch)
+            logger.report_scalar("metrics", metric_name, value, iteration=epoch)
     
     def _should_plot(self, epoch: int) -> bool:
         """Check if should plot at current epoch."""
@@ -279,8 +366,9 @@ class DGDTrainer:
             if self.config.data.use_subset:
                 print(f"Using data subset: {self.config.data.subset_fraction:.1%}")
         
-        # MLflow logging
-        mlflow.log_params({
+        # ClearML logging
+        self.task.connect(self.config)  # Connect the configuration
+        self.task.set_parameters({
             "decoder_params": decoder_params,
             "rep_params": rep_params,
             "test_rep_params": test_rep_params,
