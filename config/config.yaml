@@ -21,13 +21,13 @@ data:
 model:
   # Representation layer configuration
   representation:
-    n_features: 32  # Latent dimension
-    distribution: "uniform"  # Options: "uniform", "normal", "beta", "gamma"
-    radius: 1.0  # For uniform distribution
+    n_features: 5  # Latent dimension
+    distribution: "uniform_sphere"  # Options: "uniform", "normal", "beta", "gamma"
+    radius: 0.1  # For uniform distribution
   
   # Decoder configuration
   decoder:
-    hidden_dims: [512, 256, 128, 64, 32]
+    hidden_dims: [128, 64, 32]
     output_channels: 1  # 1 for grayscale, 3 for RGB
     output_size: [28, 28]
     init_size: [4, 4]
@@ -48,13 +48,13 @@ model:
   
   # GMM configuration
   gmm:
-    n_components: 10
-    covariance_type: "full"  # Options: "full", "tied", "diag", "spherical"
-    init_params: "kmeans"  # Options: "kmeans", "random"
+    n_components: 20
+    covariance_type: "spherical"  # Options: "full", "tied", "diag", "spherical"
+    init_params: "maxdist"  # Options: "kmeans", "random"
     verbose: false
     max_iter: 1000
     tol: 1e-3
-    n_init: 10
+    n_init: 1
     warm_start: false
 
 # Training configuration
@@ -64,7 +64,7 @@ training:
   
   # GMM training schedule
   first_epoch_gmm: 50
-  refit_gmm_interval: 25
+  refit_gmm_interval: 50
   lambda_gmm: 1.0
   
   # Optimizer configuration
@@ -72,20 +72,20 @@ training:
     decoder:
       type: "AdamW"
       lr: 0.001
-      weight_decay: 0.0  # No weight decay for decoder (recommended)
+      weight_decay: 0.01
       betas: [0.9, 0.999]
       eps: 1e-8
     representation:
       type: "AdamW"
-      lr: 0.01  # Higher learning rate for representations
-      weight_decay: 0.01
+      lr: 0.01
+      weight_decay: 0.0
       betas: [0.9, 0.999]
       eps: 1e-8
   
   # Logging configuration
   logging:
-    log_interval: 10  # Log every N epochs
-    plot_interval: 25  # Create plots every N epochs
+    log_interval: 1  # Log every N epochs
+    plot_interval: 50  # Create plots every N epochs
     save_figures: true
     figure_format: "png"
     dpi: 150

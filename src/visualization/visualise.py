@@ -299,7 +299,7 @@ class LatentSpaceVisualizer:
                               ax: plt.Axes, 
                               data: np.ndarray, 
                               labels: np.ndarray, 
-                              means: np.ndarray, 
+                              means: Optional[np.ndarray], 
                               label_names: List[str], 
                               title_prefix: str,
                               x_label: str, 
@@ -333,8 +333,8 @@ class LatentSpaceVisualizer:
                           color=self.custom_colors[i % len(self.custom_colors)], 
                           label=f"{name}", alpha=self.config.scatter_alpha)
         
-        # Plot GMM means with black stars
-        if len(means) > 0:
+        # Plot GMM means with black stars (only if means are available)
+        if means is not None and len(means) > 0:
             ax.scatter(means[:, 0], means[:, 1], 
                       s=self.config.mean_marker_size, c='black', marker='*', label="GMM Means")
         
@@ -347,7 +347,7 @@ class LatentSpaceVisualizer:
     def _plot_gmm_samples(self, 
                          ax: plt.Axes, 
                          samples: np.ndarray, 
-                         means: np.ndarray, 
+                         means: Optional[np.ndarray], 
                          label_names: List[str], 
                          transform_fn: Callable[[np.ndarray], np.ndarray], 
                          x_label: str, 
@@ -375,7 +375,7 @@ class LatentSpaceVisualizer:
         
         ax.scatter(samples_reduced[:, 0], samples_reduced[:, 1], 
                   s=self.config.scatter_point_size, c='grey', alpha=0.5, label="GMM Samples")
-        if len(means) > 0:
+        if means is not None and len(means) > 0:
             ax.scatter(means[:, 0], means[:, 1], 
                       s=self.config.mean_marker_size, c='black', marker='*', label="GMM Means")
         
@@ -402,8 +402,8 @@ class LatentSpaceVisualizer:
         covariance_type : str, optional
             Type of GMM covariance ('full', 'diag', 'spherical')
         """
-        # Early return if no transform components are provided
-        if transform_components is None:
+        # Early return if no transform components are provided or means are None
+        if transform_components is None or means is None or means.size == 0:
             return
             
         # Plot ellipses for each Gaussian component
@@ -453,13 +453,39 @@ class LatentSpaceVisualizer:
         """
         params = {}
         
-        # Extract means
-        params['means'] = self._convert_to_numpy(gmm.means_)
+        # Check if GMM is fitted and has valid means
+        if (hasattr(gmm, 'means_') and 
+            gmm.means_ is not None and 
+            hasattr(gmm, 'converged_') and 
+            gmm.converged_ is not None):
+            
+            try:
+                means_np = self._convert_to_numpy(gmm.means_)
+                # Check if means contain valid values (not NaN or infinite)
+                if np.all(np.isfinite(means_np)) and means_np.size > 0:
+                    params['means'] = means_np
+                else:
+                    params['means'] = None
+            except (AttributeError, TypeError, ValueError):
+                params['means'] = None
+        else:
+            params['means'] = None
         
         # Extract covariances if available
-        if hasattr(gmm, 'covariances_'):
-            params['covariances'] = self._convert_to_numpy(gmm.covariances_)
-            params['covariance_type'] = getattr(gmm, 'covariance_type', 'full')
+        if (hasattr(gmm, 'covariances_') and 
+            gmm.covariances_ is not None and 
+            params['means'] is not None):
+            try:
+                cov_np = self._convert_to_numpy(gmm.covariances_)
+                if np.all(np.isfinite(cov_np)) and cov_np.size > 0:
+                    params['covariances'] = cov_np
+                    params['covariance_type'] = getattr(gmm, 'covariance_type', 'full')
+                else:
+                    params['covariances'] = None
+                    params['covariance_type'] = None
+            except (AttributeError, TypeError, ValueError):
+                params['covariances'] = None
+                params['covariance_type'] = None
         else:
             params['covariances'] = None
             params['covariance_type'] = None
@@ -490,7 +516,7 @@ class LatentSpaceVisualizer:
         return {
             'z_train_reduced': pca.transform(z_train),
             'z_test_reduced': pca.transform(z_test),
-            'means_reduced': pca.transform(means),
+            'means_reduced': pca.transform(means) if means is not None and means.size > 0 else None,
             'reducer': pca,
             'x_label': kwargs.get('xlabel', "Principal Component 1"),
             'y_label': kwargs.get('ylabel', "Principal Component 2"),
@@ -518,7 +544,7 @@ class LatentSpaceVisualizer:
         return {
             'z_train_reduced': z_all_reduced[:split],
             'z_test_reduced': z_all_reduced[split:],
-            'means_reduced': reducer.transform(means),
+            'means_reduced': reducer.transform(means) if means is not None and means.size > 0 else None,
             'reducer': reducer,
             'x_label': "UMAP Dimension 1",
             'y_label': "UMAP Dimension 2",
@@ -687,14 +713,11 @@ class LatentSpaceVisualizer:
         z_all = np.vstack([z_train_np, z_test_np])
         split = len(z_train_np)
         
-        # Extract GMM parameters
-        means = self._convert_to_numpy(gmm.means_)
-        if hasattr(gmm, 'covariances_'):
-            covariances = self._convert_to_numpy(gmm.covariances_)
-            covariance_type = getattr(gmm, 'covariance_type', 'full')
-        else:
-            covariances = None
-            covariance_type = None
+        # Extract GMM parameters safely
+        gmm_params = self._extract_gmm_parameters(gmm)
+        means = gmm_params['means']
+        covariances = gmm_params['covariances']
+        covariance_type = gmm_params['covariance_type']
             
         # Generate samples from GMM if available
         gmm_samples = self._sample_from_gmm(gmm)
@@ -719,7 +742,7 @@ class LatentSpaceVisualizer:
             
             z_train_reduced = kpca.transform(z_train_np)
             z_test_reduced = kpca.transform(z_test_np)
-            means_reduced = kpca.transform(means)
+            means_reduced = kpca.transform(means) if means is not None and means.size > 0 else None
             
             # Labels for axes
             x_label = f"Kernel PCA Dimension 1 ({kernel})"
@@ -752,14 +775,16 @@ class LatentSpaceVisualizer:
             z_train_reduced = z_all_reduced[:split]
             z_test_reduced = z_all_reduced[split:]
             
-            # Project GMM means to t-SNE space (approximate)
+            # Project GMM means to t-SNE space (approximate) - only if means are available
             means_reduced = []
-            for mean in means:
-                distances = np.sum((z_all - mean) ** 2, axis=1)
-                closest_idx = np.argmin(distances)
-                means_reduced.append(z_all_reduced[closest_idx])
-                
-            means_reduced = np.array(means_reduced)
+            if means is not None and means.size > 0:
+                for mean in means:
+                    distances = np.sum((z_all - mean) ** 2, axis=1)
+                    closest_idx = np.argmin(distances)
+                    means_reduced.append(z_all_reduced[closest_idx])
+                means_reduced = np.array(means_reduced)
+            else:
+                means_reduced = None
             
             # Labels for axes
             x_label = "t-SNE Dimension 1"
