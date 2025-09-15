@@ -155,7 +155,6 @@ class DGDTrainer:
         # PyTorch optimizers
         pytorch_optimizers = {
             'adadelta': torch.optim.Adadelta,
-            'adafactor': torch.optim.Adafactor,
             'adagrad': torch.optim.Adagrad,
             'adam': torch.optim.Adam,
             'adamw': torch.optim.AdamW,
