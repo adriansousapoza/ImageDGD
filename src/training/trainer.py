@@ -400,7 +400,7 @@ class DGDTrainer:
                     gmm.fit(representations, max_iter=1000 if epoch == first_epoch_gmm else 100)
             elif epoch > first_epoch_gmm:
                 if self.verbose and epoch % (refit_gmm_interval or 10) == 0:
-                    print(f"Updating GMM at epoch {epoch}...")
+                    print(f"Re-Fitting GMM at epoch {epoch}...")
                 with torch.no_grad():
                     representations = rep.z.detach()
                     gmm.fit(representations, max_iter=100, warm_start=True)

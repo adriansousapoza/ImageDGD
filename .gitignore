@@ -78,3 +78,6 @@ outputs/
 
 # Optuna
 optuna_studies/
+
+# DGD schematic
+schematic/
