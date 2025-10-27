@@ -3,14 +3,25 @@ experiment_name: ImageDGD_Default
 description: Default ImageDGD training configuration
 data:
   dataset: FashionMNIST
-  data_dir: /maps/projects/heads/people/kbh904/ImageDGD/data
+  data_dir: ./data
   batch_size: 128
   num_workers: 4
   pin_memory: true
   use_subset: false
   subset_fraction: 1.0
   normalize: true
+  dataset_name: FashionMNIST
+  root_dir: /home/asp/Downloads/HeaDS/ImageDGD/data
   download: true
+  shuffle_train: true
+  shuffle_test: false
+  transforms:
+    train:
+    - ToTensor
+    - Normalize
+    test:
+    - ToTensor
+    - Normalize
   class_names:
   - T-shirt/top
   - Trouser
@@ -24,9 +35,10 @@ data:
   - Ankle boot
 model:
   representation:
-    n_features: 5
-    distribution: uniform_sphere
-    radius: 0.1
+    n_features: 2
+    distribution: uniform_ball
+    dist_params:
+      radius: 1.0
   decoder:
     hidden_dims:
     - 128
@@ -45,7 +57,6 @@ model:
     output_padding: 1
     bias: true
     normalization: batch
-    use_batch_norm: true
     activation: leaky_relu
     final_activation: sigmoid
     dropout_rate: 0.0
@@ -55,13 +66,13 @@ model:
     attention_resolution: 32
   gmm:
     n_components: 20
-    covariance_type: spherical
-    init_params: maxdist
+    covariance_type: full
+    init_params: kmeans
     verbose: false
     max_iter: 1000
     tol: 0.001
     n_init: 1
-    warm_start: false
+    warm_start: true
 training:
   epochs: 200
   device: auto
@@ -98,7 +109,3 @@ clearml:
   tags:
   - default
   - production
-hardware:
-  mixed_precision: false
-  compile_model: false
-  benchmark_cudnn: true

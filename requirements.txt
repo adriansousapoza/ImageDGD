@@ -17,6 +17,9 @@ pyyaml>=6.0
 python-dotenv>=0.19.0
 tensorboard>=2.11.0
 
+# Gaussian Mixture Model package
+tgmm  # Torch Gaussian Mixture Model - https://github.com/adriansousapoza/tgmm
+
 # Optional optimizers
 lion-pytorch>=0.0.6  # Lion optimizer
 sophia-opt>=0.2.1    # Sophia optimizer
