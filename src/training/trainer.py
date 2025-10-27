@@ -27,7 +27,10 @@ except ImportError:
     SOPHIA_AVAILABLE = False
     SophiaG = None
 
-from ..models import RepresentationLayer, DGD, ConvDecoder, GaussianMixture
+# Import tgmm package for Gaussian Mixture Model
+from tgmm import GaussianMixture
+
+from ..models import RepresentationLayer, DGD, ConvDecoder
 from ..visualization import LatentSpaceVisualizer, plot_training_losses, plot_images, plot_gmm_images, plot_gmm_samples
 
 
@@ -121,7 +124,6 @@ class DGDTrainer:
             hidden_dims=model_config.decoder.hidden_dims,
             output_channels=model_config.decoder.output_channels,
             output_size=model_config.decoder.output_size,
-            use_batch_norm=model_config.decoder.use_batch_norm,
             activation=model_config.decoder.activation,
             final_activation=model_config.decoder.final_activation,
             dropout_rate=model_config.decoder.dropout_rate,
@@ -376,8 +378,8 @@ class DGDTrainer:
         
         # Training loop
         start_time = time.time()
-        
-        for epoch in tqdm(range(1, self.training_config.epochs + 1), desc="Training"):
+
+        for epoch in range(1, self.training_config.epochs + 1):
             epoch_start_time = time.time()
             
             # Initialize loss tracking

@@ -1,14 +1,24 @@
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.patches import Ellipse
-from sklearn.decomposition import PCA, KernelPCA
-from sklearn.manifold import TSNE
-from umap import UMAP
 import torch
 import os
 import logging
 from typing import Optional, Union, List, Tuple, Dict, Any, Callable
 from dataclasses import dataclass
+
+# Try to use cuML for GPU acceleration, fall back to sklearn if not available
+try:
+    from cuml import PCA, TSNE
+    from cuml.manifold import UMAP
+    GPU_AVAILABLE = True
+    print("✓ Using cuML (GPU-accelerated) for dimensionality reduction")
+except ImportError:
+    from sklearn.decomposition import PCA, KernelPCA
+    from sklearn.manifold import TSNE
+    from umap import UMAP
+    GPU_AVAILABLE = False
+    print("⚠️ cuML not available, using sklearn (CPU) for dimensionality reduction")
 
 # Set up logging
 logger = logging.getLogger(__name__)
@@ -507,20 +517,36 @@ class LatentSpaceVisualizer:
             Dictionary containing reduced data and reducer object
         """
         pca_kwargs = {'n_components': 2}
-        if random_state is not None:
+        if random_state is not None and not GPU_AVAILABLE:
+            # cuML's PCA doesn't support random_state
             pca_kwargs['random_state'] = random_state
             
         pca = PCA(**pca_kwargs)
         pca.fit(z_all)
         
+        # Convert results to numpy if using cuML (returns cuDF/cupy arrays)
+        z_train_reduced = pca.transform(z_train)
+        z_test_reduced = pca.transform(z_test)
+        means_reduced = pca.transform(means) if means is not None and means.size > 0 else None
+        
+        if GPU_AVAILABLE:
+            import cupy as cp
+            z_train_reduced = cp.asnumpy(z_train_reduced) if hasattr(z_train_reduced, 'values') else z_train_reduced
+            z_test_reduced = cp.asnumpy(z_test_reduced) if hasattr(z_test_reduced, 'values') else z_test_reduced
+            if means_reduced is not None:
+                means_reduced = cp.asnumpy(means_reduced) if hasattr(means_reduced, 'values') else means_reduced
+            components = cp.asnumpy(pca.components_) if hasattr(pca.components_, 'values') else pca.components_
+        else:
+            components = pca.components_
+        
         return {
-            'z_train_reduced': pca.transform(z_train),
-            'z_test_reduced': pca.transform(z_test),
-            'means_reduced': pca.transform(means) if means is not None and means.size > 0 else None,
+            'z_train_reduced': z_train_reduced,
+            'z_test_reduced': z_test_reduced,
+            'means_reduced': means_reduced,
             'reducer': pca,
             'x_label': kwargs.get('xlabel', "Principal Component 1"),
             'y_label': kwargs.get('ylabel', "Principal Component 2"),
-            'transform_components': pca.components_
+            'transform_components': components
         }
     
     def _apply_umap(self, 
@@ -540,11 +566,28 @@ class LatentSpaceVisualizer:
         reducer = UMAP(**umap_kwargs)
         z_all_reduced = reducer.fit_transform(z_all)
         
+        # Convert cuML results to numpy if needed
+        if GPU_AVAILABLE:
+            import cupy as cp
+            z_all_reduced = cp.asnumpy(z_all_reduced) if hasattr(z_all_reduced, '__cuda_array_interface__') else np.asarray(z_all_reduced)
+        
         split = len(z_train)
+        z_train_reduced = z_all_reduced[:split]
+        z_test_reduced = z_all_reduced[split:]
+        
+        # Transform means
+        if means is not None and means.size > 0:
+            means_reduced = reducer.transform(means)
+            if GPU_AVAILABLE:
+                import cupy as cp
+                means_reduced = cp.asnumpy(means_reduced) if hasattr(means_reduced, '__cuda_array_interface__') else np.asarray(means_reduced)
+        else:
+            means_reduced = None
+            
         return {
-            'z_train_reduced': z_all_reduced[:split],
-            'z_test_reduced': z_all_reduced[split:],
-            'means_reduced': reducer.transform(means) if means is not None and means.size > 0 else None,
+            'z_train_reduced': z_train_reduced,
+            'z_test_reduced': z_test_reduced,
+            'means_reduced': means_reduced,
             'reducer': reducer,
             'x_label': "UMAP Dimension 1",
             'y_label': "UMAP Dimension 2",
@@ -764,13 +807,36 @@ class LatentSpaceVisualizer:
             perplexity = kwargs.get('perplexity', 30)
             max_iter = kwargs.get('max_iter', 1000)
             
+            # Adjust perplexity based on dataset size
+            # Rule: perplexity should be less than (n_samples / 3)
+            # Also, # of neighbors should be at least 3 * perplexity
+            n_samples = len(z_all)
+            max_perplexity = (n_samples - 1) // 3
+            if perplexity > max_perplexity:
+                old_perplexity = perplexity
+                perplexity = max(5, max_perplexity)  # Minimum perplexity of 5
+                logger.warning(f"Adjusted t-SNE perplexity from {old_perplexity} to {perplexity} "
+                             f"due to small dataset size (n={n_samples})")
+                print(f"⚠️ Adjusted t-SNE perplexity from {old_perplexity} to {perplexity} for dataset with {n_samples} samples")
+            
             # Only set random_state if explicitly provided
-            tsne_kwargs = {'n_components': 2, 'perplexity': perplexity, 'max_iter': max_iter}
+            tsne_kwargs = {'n_components': 2, 'perplexity': perplexity}
+            if not GPU_AVAILABLE:
+                # sklearn's TSNE uses n_iter, cuML uses max_iter
+                tsne_kwargs['n_iter'] = max_iter
+            else:
+                tsne_kwargs['max_iter'] = max_iter
+                
             if random_state is not None:
                 tsne_kwargs['random_state'] = random_state
                 
             tsne = TSNE(**tsne_kwargs)
             z_all_reduced = tsne.fit_transform(z_all)
+            
+            # Convert cuML results to numpy if needed
+            if GPU_AVAILABLE:
+                import cupy as cp
+                z_all_reduced = cp.asnumpy(z_all_reduced) if hasattr(z_all_reduced, '__cuda_array_interface__') else np.asarray(z_all_reduced)
             
             z_train_reduced = z_all_reduced[:split]
             z_test_reduced = z_all_reduced[split:]

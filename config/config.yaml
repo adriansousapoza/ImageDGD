@@ -8,7 +8,7 @@ description: "Default ImageDGD training configuration"
 
 # Data configuration
 data:
-  dataset: "FashionMNIST"  # Options: "FashionMNIST", "MNIST", "CIFAR10"
+  dataset: "FashionMNIST"
   data_dir: "./data"
   batch_size: 128
   num_workers: 4
@@ -21,14 +21,14 @@ data:
 model:
   # Representation layer configuration
   representation:
-    n_features: 5  # Latent dimension
-    distribution: "uniform_sphere"  # Options: "uniform", "normal", "beta", "gamma"
-    radius: 0.1  # For uniform distribution
+    n_features: 2
+    distribution: "uniform_ball"
+    dist_params: {'radius': 1.0}
   
   # Decoder configuration
   decoder:
     hidden_dims: [128, 64, 32]
-    output_channels: 1  # 1 for grayscale, 3 for RGB
+    output_channels: 1
     output_size: [28, 28]
     init_size: [4, 4]
     kernel_size: 3
@@ -36,12 +36,11 @@ model:
     padding: 1
     output_padding: 1
     bias: true
-    normalization: "batch"  # Options: "batch", "group", "layer", "instance", "none"
-    use_batch_norm: true  # Deprecated, use normalization
-    activation: "leaky_relu"  # See ConvDecoder for all options
+    normalization: "batch"
+    activation: "leaky_relu"
     final_activation: "sigmoid"
     dropout_rate: 0.0
-    upsampling_mode: "transpose"  # Options: "transpose", "nearest", "bilinear", "bicubic"
+    upsampling_mode: "transpose"
     use_spectral_norm: false
     use_self_attention: false
     attention_resolution: 32
@@ -49,18 +48,18 @@ model:
   # GMM configuration
   gmm:
     n_components: 20
-    covariance_type: "spherical"  # Options: "full", "tied", "diag", "spherical"
-    init_params: "maxdist"  # Options: "kmeans", "random"
+    covariance_type: "full"
+    init_params: "kmeans"
     verbose: false
     max_iter: 1000
     tol: 1e-3
     n_init: 1
-    warm_start: false
+    warm_start: true
 
 # Training configuration
 training:
   epochs: 200
-  device: "auto"  # Options: "auto", "cpu", "cuda", "cuda:0", etc.
+  device: "auto"
   
   # GMM training schedule
   first_epoch_gmm: 50
@@ -84,8 +83,8 @@ training:
   
   # Logging configuration
   logging:
-    log_interval: 1  # Log every N epochs
-    plot_interval: 50  # Create plots every N epochs
+    log_interval: 1
+    plot_interval: 50
     save_figures: true
     figure_format: "png"
     dpi: 150
@@ -96,9 +95,3 @@ clearml:
   project_name: "ImageDGD"
   task_name: "Default_Training"
   tags: ["default", "production"]
-  
-# Hardware configuration
-hardware:
-  mixed_precision: false
-  compile_model: false  # PyTorch 2.0 model compilation
-  benchmark_cudnn: true
