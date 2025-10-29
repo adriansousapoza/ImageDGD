@@ -265,6 +265,16 @@ class LatentSpaceVisualizer:
         if n_samples is None:
             n_samples = self.config.gmm_samples_default
             
+        # Check if GMM has been fitted
+        if not hasattr(gmm, 'fitted_') or not gmm.fitted_:
+            logger.debug("GMM not fitted yet, skipping sampling")
+            return None
+            
+        # Check if GMM has weights (means it's been fitted)
+        if not hasattr(gmm, 'weights_') or gmm.weights_ is None:
+            logger.debug("GMM has no weights, skipping sampling")
+            return None
+            
         try:
             if hasattr(gmm, 'sample'):
                 samples, _ = gmm.sample(n_samples)
@@ -821,11 +831,8 @@ class LatentSpaceVisualizer:
             
             # Only set random_state if explicitly provided
             tsne_kwargs = {'n_components': 2, 'perplexity': perplexity}
-            if not GPU_AVAILABLE:
-                # sklearn's TSNE uses n_iter, cuML uses max_iter
-                tsne_kwargs['n_iter'] = max_iter
-            else:
-                tsne_kwargs['max_iter'] = max_iter
+            # Both sklearn and cuML use n_iter parameter
+            tsne_kwargs['n_iter'] = max_iter
                 
             if random_state is not None:
                 tsne_kwargs['random_state'] = random_state

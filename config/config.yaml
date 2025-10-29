@@ -48,13 +48,26 @@ model:
   # GMM configuration
   gmm:
     n_components: 20
-    covariance_type: "full"
-    init_params: "kmeans"
-    verbose: false
+    n_features: null  # If None, inferred from data
+    covariance_type: "full"  # 'full', 'diag', 'spherical', 'tied_full', 'tied_diag', 'tied_spherical'
     max_iter: 1000
-    tol: 1e-3
-    n_init: 1
-    warm_start: true
+    tol: 1e-4
+    reg_covar: 1e-6
+    n_init: 1  # Number of random initializations
+    init_means: "kmeans"  # 'kmeans', 'kpp', 'random', 'points', 'maxdist' or tensor
+    init_weights: "uniform"  # 'uniform', 'random', 'kmeans' or tensor
+    init_covariances: "empirical"  # 'empirical', 'eye', 'random', 'global' or tensor
+    random_state: null  # Random seed for reproducibility
+    warm_start: false
+    cem: false  # Use Classification EM instead of standard EM
+    weight_concentration_prior: null  # Dirichlet prior for weights (MAP)
+    mean_prior: null  # Prior for means (MAP)
+    mean_precision_prior: null  # Precision of mean prior (MAP)
+    covariance_prior: null  # Prior for covariances (MAP)
+    degrees_of_freedom_prior: null  # Degrees of freedom for Wishart prior (MAP)
+    verbose: false
+    verbose_interval: 10
+    device: null  # 'cpu', 'cuda', or None (auto-detect)
 
 # Training configuration
 training:
