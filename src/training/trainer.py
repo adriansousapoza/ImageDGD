@@ -132,17 +132,27 @@ class DGDTrainer:
         
         # Create GMM
         gmm = GaussianMixture(
-            n_features=model_config.representation.n_features,
             n_components=model_config.gmm.n_components,
+            n_features=model_config.gmm.n_features if model_config.gmm.n_features else model_config.representation.n_features,
             covariance_type=model_config.gmm.covariance_type,
-            init_params=model_config.gmm.init_params,
-            device=self.device,
-            random_state=self.config.random_seed,
-            verbose=model_config.gmm.verbose,
             max_iter=model_config.gmm.max_iter,
             tol=model_config.gmm.tol,
+            reg_covar=model_config.gmm.reg_covar,
             n_init=model_config.gmm.n_init,
-            warm_start=model_config.gmm.warm_start
+            init_means=model_config.gmm.init_means,
+            init_weights=model_config.gmm.init_weights,
+            init_covariances=model_config.gmm.init_covariances,
+            random_state=model_config.gmm.random_state if model_config.gmm.random_state else self.config.random_seed,
+            warm_start=model_config.gmm.warm_start,
+            cem=model_config.gmm.cem,
+            weight_concentration_prior=model_config.gmm.weight_concentration_prior,
+            mean_prior=model_config.gmm.mean_prior,
+            mean_precision_prior=model_config.gmm.mean_precision_prior,
+            covariance_prior=model_config.gmm.covariance_prior,
+            degrees_of_freedom_prior=model_config.gmm.degrees_of_freedom_prior,
+            verbose=model_config.gmm.verbose,
+            verbose_interval=model_config.gmm.verbose_interval,
+            device=model_config.gmm.device if model_config.gmm.device else self.device,
         )
         
         # Create full model

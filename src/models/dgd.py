@@ -138,8 +138,6 @@ class ConvDecoder(BaseDecoder):
                  dropout_rate: float = 0.0,
                  upsampling_mode: str = 'transpose',
                  use_spectral_norm: bool = False,
-                 use_self_attention: bool = False,
-                 attention_resolution: int = 32,
                  **kwargs) -> None:
         super(ConvDecoder, self).__init__()
         
@@ -231,8 +229,6 @@ class ConvDecoder(BaseDecoder):
         self.normalization = normalization
         self.upsampling_mode = upsampling_mode
         self.use_spectral_norm = use_spectral_norm
-        self.use_self_attention = use_self_attention
-        self.attention_resolution = attention_resolution
         
         # Convert Hydra ListConfig objects to regular Python tuples/lists
         # This is necessary because PyTorch layers expect native Python types
@@ -340,11 +336,6 @@ class ConvDecoder(BaseDecoder):
             if dropout_rate > 0:
                 layer_modules.append(nn.Dropout(dropout_rate))
             
-            # Add self-attention if requested (at higher resolutions)
-            current_resolution = self.init_size[0] * (2 ** (i + 1))
-            if use_self_attention and current_resolution >= attention_resolution:
-                layer_modules.append(SelfAttention2d(hidden_dims[i + 1]))
-            
             modules.append(nn.Sequential(*layer_modules))
         
         # Final output layer
@@ -444,51 +435,3 @@ class ConvDecoder(BaseDecoder):
         :return: (Tensor) Output tensor with reconstructed images
         """
         return self.decode(z)
-
-
-
-    
-class SelfAttention2d(nn.Module):
-    """Self-attention module for 2D feature maps."""
-    
-    def __init__(self, in_channels: int, num_heads: int = 8):
-        super().__init__()
-        self.in_channels = in_channels
-        self.num_heads = num_heads
-        self.head_dim = in_channels // num_heads
-        
-        assert in_channels % num_heads == 0, "in_channels must be divisible by num_heads"
-        
-        self.query = nn.Conv2d(in_channels, in_channels, kernel_size=1)
-        self.key = nn.Conv2d(in_channels, in_channels, kernel_size=1)
-        self.value = nn.Conv2d(in_channels, in_channels, kernel_size=1)
-        self.proj_out = nn.Conv2d(in_channels, in_channels, kernel_size=1)
-        
-        self.scale = self.head_dim ** -0.5
-        
-    def forward(self, x: Tensor) -> Tensor:
-        B, C, H, W = x.shape
-        
-        # Generate query, key, value
-        q = self.query(x).view(B, self.num_heads, self.head_dim, H * W)
-        k = self.key(x).view(B, self.num_heads, self.head_dim, H * W)
-        v = self.value(x).view(B, self.num_heads, self.head_dim, H * W)
-        
-        # Compute attention
-        q = q.permute(0, 1, 3, 2)  # B, heads, HW, head_dim
-        k = k.permute(0, 1, 2, 3)  # B, heads, head_dim, HW
-        
-        attn = torch.matmul(q, k) * self.scale
-        attn = F.softmax(attn, dim=-1)
-        
-        # Apply attention to values
-        v = v.permute(0, 1, 3, 2)  # B, heads, HW, head_dim
-        out = torch.matmul(attn, v)  # B, heads, HW, head_dim
-        
-        # Reshape and project
-        out = out.permute(0, 1, 3, 2).contiguous()  # B, heads, head_dim, HW
-        out = out.view(B, C, H, W)
-        out = self.proj_out(out)
-        
-        # Residual connection
-        return x + out
