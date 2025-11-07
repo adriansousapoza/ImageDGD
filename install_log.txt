@@ -1,0 +1,581 @@
+========================================================================
+  RAPIDS + CUDA Installation
+========================================================================
+
+Checking for CUDA 13...
+ERROR: Unable to locate a modulefile for 'cuda/13.0'
+ERROR: Unable to locate a modulefile for 'cuda/13'
+  ✗ CUDA 13 module not available
+
+Checking for CUDA 12.8 as fallback...
+  ✓ CUDA 12.8 module loaded from system
+  ✓ nvcc detected: version 12.8.61
+
+------------------------------------------------------------------------
+Using CUDA 12 (suffix: cu121 for PyTorch, cu12 for RAPIDS)
+------------------------------------------------------------------------
+
+Loaded modules:
+Currently Loaded Modulefiles:
+ 1) cuda/12.8  
+
+------------------------------------------------------------------------
+Checking for UV package manager...
+  ✓ UV version: uv 0.9.6
+
+------------------------------------------------------------------------
+Creating Python virtual environment with Python 3.13...
+This may take several minutes...
+
+Using CPython 3.13.9
+Creating virtual environment at: /home/kbh904/.venvs/rapids_cuda12
+Activate with: source /home/kbh904/.venvs/rapids_cuda12/bin/activate
+
+  ✓ Virtual environment created at /home/kbh904/.venvs/rapids_cuda12
+
+Activating environment...
+  ✓ Python version: Python 3.13.9
+
+========================================================================
+Installing RAPIDS 25.10 packages (CUDA 12)...
+IMPORTANT: Installing RAPIDS before other packages for proper dependency resolution
+
+Using Python 3.13.9 environment at: /home/kbh904/.venvs/rapids_cuda12
+Resolved 175 packages in 3.36s
+Downloading cuda-bindings (11.4MiB)
+Downloading llvmlite (40.4MiB)
+Downloading cupy-cuda12x (107.4MiB)
+Downloading pyogrio (26.3MiB)
+Downloading scipy (34.0MiB)
+Downloading pyarrow (45.5MiB)
+Downloading datashader (17.5MiB)
+Downloading scikit-image (14.3MiB)
+Downloading pandas (11.7MiB)
+Downloading numpy (15.8MiB)
+Downloading panel (28.2MiB)
+Downloading nvidia-cuda-cccl-cu12 (3.0MiB)
+Downloading nvidia-cuda-runtime-cu12 (3.3MiB)
+Downloading nvidia-nvjitlink-cu12 (37.9MiB)
+Downloading librmm-cu12 (3.4MiB)
+Downloading nvidia-curand-cu12 (65.1MiB)
+Downloading cucim-cu12 (8.3MiB)
+Downloading libcudf-cu12 (598.2MiB)
+Downloading cuvs-cu12 (1.2MiB)
+Downloading nvidia-cuda-nvcc-cu12 (38.7MiB)
+Downloading libucx-cu12 (26.6MiB)
+Downloading nvidia-cusolver-cu12 (322.5MiB)
+Downloading nvidia-cublas-cu12 (554.3MiB)
+Downloading nvidia-cuda-nvrtc-cu12 (85.4MiB)
+Downloading cuml-cu12 (6.5MiB)
+Downloading nvidia-cufft-cu12 (191.6MiB)
+Downloading pylibcugraph-cu12 (2.1MiB)
+Downloading nvidia-cusparse-cu12 (349.5MiB)
+Downloading libkvikio-cu12 (2.2MiB)
+Downloading libraft-cu12 (23.6MiB)
+Downloading cugraph-cu12 (1.8MiB)
+Downloading libcuml-cu12 (451.9MiB)
+Downloading cudf-cu12 (2.5MiB)
+Downloading libcugraph-cu12 (1.4GiB)
+Downloading nvidia-nccl-cu12 (283.0MiB)
+Downloading libcuvs-cu12 (801.1MiB)
+Downloading pylibcudf-cu12 (20.3MiB)
+Downloading pyproj (9.1MiB)
+Downloading scikit-learn (9.0MiB)
+Downloading pillow (6.7MiB)
+Downloading bokeh (6.6MiB)
+Downloading holoviews (4.8MiB)
+Downloading numba (3.7MiB)
+Downloading cuda-core (2.9MiB)
+Downloading shapely (2.4MiB)
+Downloading networkx (1.9MiB)
+Downloading aiohttp (1.7MiB)
+Downloading dask (1.4MiB)
+Downloading xarray (1.3MiB)
+Downloading pygments (1.2MiB)
+ Downloading xarray
+ Downloading aiohttp
+ Downloading dask
+ Downloading pygments
+ Downloading shapely
+ Downloading networkx
+ Downloading cuda-core
+ Downloading cugraph-cu12
+ Downloading cuvs-cu12
+ Downloading numba
+ Downloading pillow
+ Downloading pylibcugraph-cu12
+ Downloading pyproj
+ Downloading holoviews
+ Downloading nvidia-cuda-runtime-cu12
+ Downloading cuda-bindings
+ Downloading scikit-learn
+ Downloading libkvikio-cu12
+ Downloading scikit-image
+ Downloading nvidia-cuda-cccl-cu12
+ Downloading numpy
+ Downloading bokeh
+ Downloading datashader
+ Downloading librmm-cu12
+ Downloading cudf-cu12
+ Downloading pyogrio
+ Downloading llvmlite
+ Downloading cuml-cu12
+ Downloading scipy
+ Downloading cucim-cu12
+ Downloading pandas
+ Downloading panel
+ Downloading pylibcudf-cu12
+ Downloading pyarrow
+ Downloading libucx-cu12
+ Downloading nvidia-cuda-nvcc-cu12
+ Downloading nvidia-nvjitlink-cu12
+ Downloading cupy-cuda12x
+ Downloading nvidia-curand-cu12
+ Downloading nvidia-cuda-nvrtc-cu12
+ Downloading nvidia-cufft-cu12
+ Downloading libraft-cu12
+ Downloading nvidia-nccl-cu12
+ Downloading nvidia-cusolver-cu12
+ Downloading nvidia-cusparse-cu12
+ Downloading nvidia-cublas-cu12
+ Downloading libcuml-cu12
+ Downloading libcudf-cu12
+ Downloading libcuvs-cu12
+ Downloading libcugraph-cu12
+Prepared 175 packages in 4m 21s
+Installed 175 packages in 12.66s
+ + aiohappyeyeballs==2.6.1
+ + aiohttp==3.13.2
+ + aiosignal==1.4.0
+ + anyio==4.11.0
+ + argon2-cffi==25.1.0
+ + argon2-cffi-bindings==25.1.0
+ + arrow==1.4.0
+ + attrs==25.4.0
+ + beautifulsoup4==4.14.2
+ + bleach==6.3.0
+ + bokeh==3.6.3
+ + cachetools==6.2.1
+ + certifi==2025.10.5
+ + cffi==2.0.0
+ + charset-normalizer==3.4.4
+ + click==8.3.0
+ + cloudpickle==3.1.1
+ + colorcet==3.1.0
+ + contourpy==1.3.3
+ + cucim-cu12==25.10.0
+ + cuda-bindings==12.9.4
+ + cuda-core==0.3.2
+ + cuda-pathfinder==1.3.2
+ + cuda-python==12.9.4
+ + cuda-toolkit==12.9.1
+ + cudf-cu12==25.10.0
+ + cugraph-cu12==25.10.1
+ + cuml-cu12==25.10.0
+ + cupy-cuda12x==13.6.0
+ + cuvs-cu12==25.10.0
+ + cuxfilter-cu12==25.10.0
+ + dask==2025.9.1
+ + dask-cuda==25.10.0
+ + dask-cudf-cu12==25.10.0
+ + datashader==0.18.2
+ + defusedxml==0.7.1
+ + distributed==2025.9.1
+ + distributed-ucxx-cu12==0.46.0
+ + fastjsonschema==2.21.2
+ + fastrlock==0.8.3
+ + fqdn==1.5.1
+ + frozenlist==1.8.0
+ + fsspec==2025.9.0
+ + geopandas==1.1.1
+ + holoviews==1.20.2
+ + idna==3.11
+ + imageio==2.37.0
+ + isoduration==20.11.0
+ + jinja2==3.1.6
+ + joblib==1.5.2
+ + jsonpointer==3.0.0
+ + jsonschema==4.25.1
+ + jsonschema-specifications==2025.9.1
+ + jupyter-client==8.6.3
+ + jupyter-core==5.9.1
+ + jupyter-events==0.12.0
+ + jupyter-server==2.17.0
+ + jupyter-server-proxy==4.4.0
+ + jupyter-server-terminals==0.5.3
+ + jupyterlab-pygments==0.3.0
+ + lark==1.3.1
+ + lazy-loader==0.4
+ + libcudf-cu12==25.10.0
+ + libcugraph-cu12==25.10.1
+ + libcuml-cu12==25.10.0
+ + libcuvs-cu12==25.10.0
+ + libkvikio-cu12==25.10.0
+ + libraft-cu12==25.10.0
+ + librmm-cu12==25.10.0
+ + libucx-cu12==1.19.0
+ + libucxx-cu12==0.46.0
+ + linkify-it-py==2.0.3
+ + llvmlite==0.44.0
+ + locket==1.0.0
+ + markdown==3.9
+ + markdown-it-py==4.0.0
+ + markupsafe==3.0.3
+ + mdit-py-plugins==0.5.0
+ + mdurl==0.1.2
+ + mistune==3.1.4
+ + msgpack==1.1.2
+ + multidict==6.7.0
+ + multipledispatch==1.0.0
+ + nbclient==0.10.2
+ + nbconvert==7.16.6
+ + nbformat==5.10.4
+ + networkx==3.5
+ + numba==0.61.2
+ + numba-cuda==0.19.1
+ + numpy==2.2.6
+ + nvidia-cublas-cu12==12.9.1.4
+ + nvidia-cuda-cccl-cu12==12.9.27
+ + nvidia-cuda-nvcc-cu12==12.9.86
+ + nvidia-cuda-nvrtc-cu12==12.9.86
+ + nvidia-cuda-runtime-cu12==12.9.79
+ + nvidia-cufft-cu12==11.4.1.4
+ + nvidia-curand-cu12==10.3.10.19
+ + nvidia-cusolver-cu12==11.7.5.82
+ + nvidia-cusparse-cu12==12.5.10.65
+ + nvidia-ml-py==13.580.82
+ + nvidia-nccl-cu12==2.28.7
+ + nvidia-nvjitlink-cu12==12.9.86
+ + nvtx==0.2.13
+ + nx-cugraph-cu12==25.10.0
+ + packaging==25.0
+ + pandas==2.3.3
+ + pandocfilters==1.5.1
+ + panel==1.7.5
+ + param==2.2.1
+ + partd==1.4.2
+ + pillow==12.0.0
+ + platformdirs==4.5.0
+ + prometheus-client==0.23.1
+ + propcache==0.4.1
+ + psutil==7.1.2
+ + ptyprocess==0.7.0
+ + pyarrow==22.0.0
+ + pycparser==2.23
+ + pyct==0.6.0
+ + pygments==2.19.2
+ + pylibcudf-cu12==25.10.0
+ + pylibcugraph-cu12==25.10.1
+ + pylibraft-cu12==25.10.0
+ + pyogrio==0.11.1
+ + pyproj==3.7.2
+ + python-dateutil==2.9.0.post0
+ + python-json-logger==4.0.0
+ + pytz==2025.2
+ + pyviz-comms==3.0.6
+ + pyyaml==6.0.3
+ + pyzmq==27.1.0
+ + raft-dask-cu12==25.10.0
+ + rapids-dask-dependency==25.10.0
+ + rapids-logger==0.1.19
+ + referencing==0.37.0
+ + requests==2.32.5
+ + rfc3339-validator==0.1.4
+ + rfc3986-validator==0.1.1
+ + rfc3987-syntax==1.1.0
+ + rich==14.2.0
+ + rmm-cu12==25.10.0
+ + rpds-py==0.28.0
+ + scikit-image==0.25.2
+ + scikit-learn==1.7.2
+ + scipy==1.16.3
+ + send2trash==1.8.3
+ + shapely==2.0.7
+ + simpervisor==1.0.0
+ + six==1.17.0
+ + sniffio==1.3.1
+ + sortedcontainers==2.4.0
+ + soupsieve==2.8
+ + tblib==3.2.0
+ + terminado==0.18.1
+ + threadpoolctl==3.6.0
+ + tifffile==2025.10.16
+ + tinycss2==1.4.0
+ + toolz==1.1.0
+ + tornado==6.5.2
+ + tqdm==4.67.1
+ + traitlets==5.14.3
+ + treelite==4.4.1
+ + typing-extensions==4.15.0
+ + tzdata==2025.2
+ + uc-micro-py==1.0.3
+ + ucxx-cu12==0.46.0
+ + uri-template==1.3.0
+ + urllib3==2.5.0
+ + webcolors==24.11.1
+ + webencodings==0.5.1
+ + websocket-client==1.9.0
+ + xarray==2025.10.1
+ + xyzservices==2025.4.0
+ + yarl==1.22.0
+ + zict==3.0.0
+
+  ✓ RAPIDS 25.10 installed successfully
+
+Testing RAPIDS installation...
+  ✓ RAPIDS cuDF working! Version: 25.10.00
+  ✓ cuML working! Version: 25.10.00
+  ✓ CuPy working!
+
+------------------------------------------------------------------------
+Installing PyTorch with CUDA 12 support...
+
+Using PyTorch with CUDA 12.x...
+Using Python 3.13.9 environment at: /home/kbh904/.venvs/rapids_cuda12
+Resolved 29 packages in 353ms
+Downloading setuptools (1.1MiB)
+Downloading nvidia-nccl-cu12 (307.4MiB)
+Downloading nvidia-cusolver-cu12 (255.1MiB)
+Downloading sympy (6.0MiB)
+Downloading nvidia-cublas-cu12 (566.8MiB)
+Downloading nvidia-nvshmem-cu12 (118.9MiB)
+Downloading nvidia-curand-cu12 (60.7MiB)
+Downloading nvidia-cusparse-cu12 (274.9MiB)
+Downloading torchvision (7.7MiB)
+Downloading nvidia-nvjitlink-cu12 (37.4MiB)
+Downloading nvidia-cufft-cu12 (184.2MiB)
+Downloading nvidia-cuda-nvrtc-cu12 (84.0MiB)
+Downloading nvidia-cufile-cu12 (1.1MiB)
+Downloading nvidia-cusparselt-cu12 (273.9MiB)
+Downloading torch (858.1MiB)
+Downloading nvidia-cuda-cupti-cu12 (9.8MiB)
+Downloading triton (162.6MiB)
+Downloading nvidia-cudnn-cu12 (674.0MiB)
+ Downloading nvidia-cufile-cu12
+ Downloading torchvision
+ Downloading nvidia-cuda-cupti-cu12
+ Downloading setuptools
+ Downloading nvidia-nvjitlink-cu12
+ Downloading nvidia-curand-cu12
+ Downloading nvidia-cuda-nvrtc-cu12
+ Downloading nvidia-nvshmem-cu12
+ Downloading sympy
+ Downloading nvidia-cufft-cu12
+ Downloading triton
+ Downloading nvidia-cusolver-cu12
+ Downloading nvidia-cusparse-cu12
+ Downloading nvidia-cusparselt-cu12
+ Downloading nvidia-nccl-cu12
+ Downloading nvidia-cudnn-cu12
+ Downloading nvidia-cublas-cu12
+ Downloading torch
+Prepared 22 packages in 2m 34s
+Uninstalled 9 packages in 526ms
+Installed 22 packages in 19.01s
+ + filelock==3.20.0
+ + mpmath==1.3.0
+ - nvidia-cublas-cu12==12.9.1.4
+ + nvidia-cublas-cu12==12.8.4.1
+ + nvidia-cuda-cupti-cu12==12.8.90
+ - nvidia-cuda-nvrtc-cu12==12.9.86
+ + nvidia-cuda-nvrtc-cu12==12.8.93
+ - nvidia-cuda-runtime-cu12==12.9.79
+ + nvidia-cuda-runtime-cu12==12.8.90
+ + nvidia-cudnn-cu12==9.10.2.21
+ - nvidia-cufft-cu12==11.4.1.4
+ + nvidia-cufft-cu12==11.3.3.83
+ + nvidia-cufile-cu12==1.13.1.3
+ - nvidia-curand-cu12==10.3.10.19
+ + nvidia-curand-cu12==10.3.9.90
+ - nvidia-cusolver-cu12==11.7.5.82
+ + nvidia-cusolver-cu12==11.7.3.90
+ - nvidia-cusparse-cu12==12.5.10.65
+ + nvidia-cusparse-cu12==12.5.8.93
+ + nvidia-cusparselt-cu12==0.7.1
+ - nvidia-nccl-cu12==2.28.7
+ + nvidia-nccl-cu12==2.27.5
+ - nvidia-nvjitlink-cu12==12.9.86
+ + nvidia-nvjitlink-cu12==12.8.93
+ + nvidia-nvshmem-cu12==3.3.20
+ + nvidia-nvtx-cu12==12.8.90
+ + setuptools==80.9.0
+ + sympy==1.14.0
+ + torch==2.9.0
+ + torchvision==0.24.0
+ + triton==3.5.0
+
+  ✓ PyTorch installed with CUDA 12 support
+
+Testing PyTorch installation...
+  ✓ PyTorch version: 2.9.0+cu128
+  ✓ CUDA available: True
+  ✓ CUDA device count: 2
+  ✓ CUDA version (PyTorch): 12.8
+
+------------------------------------------------------------------------
+Installing ImageDGD project dependencies...
+Using Python 3.13.9 environment at: /home/kbh904/.venvs/rapids_cuda12
+Resolved 187 packages in 4.83s
+Downloading grpcio (6.3MiB)
+Downloading notebook (13.7MiB)
+Downloading virtualenv (5.7MiB)
+Downloading widgetsnbextension (2.1MiB)
+Downloading matplotlib (8.3MiB)
+Downloading babel (9.7MiB)
+Downloading black (1.6MiB)
+Downloading jupyterlab (11.7MiB)
+Downloading kiwisolver (1.4MiB)
+Downloading fonttools (4.7MiB)
+Downloading tensorboard (5.3MiB)
+Downloading clearml (1.2MiB)
+Downloading sqlalchemy (3.1MiB)
+Downloading debugpy (5.0MiB)
+Downloading jedi (1.5MiB)
+Downloading plotly (9.4MiB)
+   Building antlr4-python3-runtime==4.9.3
+      Built antlr4-python3-runtime==4.9.3
+ Downloading kiwisolver
+ Downloading widgetsnbextension
+ Downloading black
+ Downloading clearml
+ Downloading sqlalchemy
+ Downloading fonttools
+ Downloading virtualenv
+ Downloading debugpy
+ Downloading grpcio
+ Downloading tensorboard
+ Downloading matplotlib
+ Downloading babel
+ Downloading jupyterlab
+ Downloading notebook
+ Downloading plotly
+ Downloading jedi
+Prepared 85 packages in 35.92s
+Installed 85 packages in 5.03s
+ + absl-py==2.3.1
+ + alembic==1.17.1
+ + antlr4-python3-runtime==4.9.3
+ + asttokens==3.0.0
+ + async-lru==2.0.5
+ + babel==2.17.0
+ + black==25.9.0
+ + cfgv==3.4.0
+ + clearml==2.0.2
+ + colorlog==6.10.1
+ + comm==0.2.3
+ + cycler==0.12.1
+ + debugpy==1.8.17
+ + decorator==5.2.1
+ + distlib==0.4.0
+ + executing==2.2.1
+ + flake8==7.3.0
+ + fonttools==4.60.1
+ + furl==2.1.4
+ + greenlet==3.2.4
+ + grpcio==1.76.0
+ + h11==0.16.0
+ + httpcore==1.0.9
+ + httpx==0.28.1
+ + hydra-core==1.3.2
+ + identify==2.6.15
+ + iniconfig==2.3.0
+ + ipykernel==7.1.0
+ + ipython==9.6.0
+ + ipython-pygments-lexers==1.1.1
+ + ipywidgets==8.1.7
+ + isort==7.0.0
+ + jedi==0.19.2
+ + json5==0.12.1
+ + jupyter==1.1.1
+ + jupyter-console==6.6.3
+ + jupyter-lsp==2.3.0
+ + jupyterlab==4.4.10
+ + jupyterlab-server==2.28.0
+ + jupyterlab-widgets==3.0.15
+ + kiwisolver==1.4.9
+ + lion-pytorch==0.2.3
+ + mako==1.3.10
+ + matplotlib==3.10.7
+ + matplotlib-inline==0.2.1
+ + mccabe==0.7.0
+ + mypy-extensions==1.1.0
+ + narwhals==2.10.0
+ + nest-asyncio==1.6.0
+ + nodeenv==1.9.1
+ + notebook==7.4.7
+ + notebook-shim==0.2.4
+ + omegaconf==2.3.0
+ + optuna==4.5.0
+ + orderedmultidict==1.0.1
+ + parso==0.8.5
+ + pathlib2==2.3.7.post1
+ + pathspec==0.12.1
+ + pexpect==4.9.0
+ + plotly==6.3.1
+ + pluggy==1.6.0
+ + pre-commit==4.3.0
+ + prompt-toolkit==3.0.52
+ + protobuf==6.33.0
+ + pure-eval==0.2.3
+ + pycodestyle==2.14.0
+ + pyflakes==3.4.0
+ + pyjwt==2.10.1
+ + pynndescent==0.5.13
+ + pyparsing==3.2.5
+ + pytest==8.4.2
+ + python-dotenv==1.2.1
+ + pytokens==0.2.0
+ + seaborn==0.13.2
+ + sophia-opt==0.2.2
+ + sqlalchemy==2.0.44
+ + stack-data==0.6.3
+ + tensorboard==2.20.0
+ + tensorboard-data-server==0.7.2
+ + tgmm==0.2.0
+ + umap-learn==0.5.9.post2
+ + virtualenv==20.35.4
+ + wcwidth==0.2.14
+ + werkzeug==3.1.3
+ + widgetsnbextension==4.0.14
+  ✓ Installed requirements from requirements.txt
+
+========================================================================
+  Installation Complete!
+========================================================================
+
+Installation Summary:
+------------------------------------------------------------------------
+  Environment location: /home/kbh904/.venvs/rapids_cuda12
+  Python: Python 3.13.9
+  RAPIDS: 25.10.00 (CUDA 12)
+  PyTorch: 2.9.0+cu128 (CUDA 12.8)
+  GPUs detected: 2
+  CUDA Toolkit: Using system CUDA 12
+
+Installed components:
+  - RAPIDS 25.10 (cuDF, cuML, cuGraph, cuPy) - GPU data science
+  - PyTorch + torchvision (CUDA 12) - Deep learning
+  - ImageDGD dependencies
+
+To activate the environment from any directory:
+------------------------------------------------------------------------
+  Option 1: Add an alias (recommended)
+     echo 'alias rapids="source /home/kbh904/.venvs/rapids_cuda12/bin/activate"' >> ~/.zshrc
+     source ~/.zshrc
+     rapids
+
+  Option 2: Activate manually
+     source /home/kbh904/.venvs/rapids_cuda12/bin/activate
+
+  To deactivate:
+     deactivate
+
+========================================================================
+  Setup alias now? (recommended)
+========================================================================
+
+Add 'rapids' alias to ~/.zshrc? [y/N] 
+  ✓ Alias added to ~/.zshrc
+  ✓ Run 'source ~/.zshrc' or open a new terminal
+  ✓ Then simply type 'rapids' to activate
+

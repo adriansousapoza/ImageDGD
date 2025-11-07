@@ -8,22 +8,44 @@ echo "  RAPIDS Environment Activation"
 echo "========================================================================"
 echo ""
 
-# Try to load CUDA 13 module if available
+# Try to load CUDA module (prefer 13, fallback to 12)
 echo "Checking for CUDA 13..."
+CUDA_VERSION=""
 if module load cuda/13.0 2>/dev/null; then
     echo "  ✓ CUDA 13.0 module loaded"
+    CUDA_VERSION="13"
 elif module load cuda/13 2>/dev/null; then
     echo "  ✓ CUDA 13 module loaded"
+    CUDA_VERSION="13"
 else
-    echo "  ✗ CUDA module not available (will use locally installed CUDA)"
+    echo "  ✗ CUDA 13 not available"
+    echo ""
+    echo "Checking for CUDA 12.8..."
+    
+    if module load cuda/12.8 2>/dev/null; then
+        echo "  ✓ CUDA 12.8 module loaded"
+        CUDA_VERSION="12"
+    elif module load cuda/12.5 2>/dev/null; then
+        echo "  ✓ CUDA 12.5 module loaded"
+        CUDA_VERSION="12"
+    else
+        echo "  ✗ CUDA module not available (will use locally installed CUDA)"
+        CUDA_VERSION="unknown"
+    fi
 fi
 
 # Activate RAPIDS virtual environment
 echo ""
 echo "Activating RAPIDS environment..."
 
-# Use global environment location
-VENV_PATH="$HOME/.venvs/rapids_cuda13"
+# Check for both CUDA 13 and CUDA 12 environments
+if [ "$CUDA_VERSION" = "13" ] || [ -d "$HOME/.venvs/rapids_cuda13" ]; then
+    VENV_PATH="$HOME/.venvs/rapids_cuda13"
+elif [ "$CUDA_VERSION" = "12" ] || [ -d "$HOME/.venvs/rapids_cuda12" ]; then
+    VENV_PATH="$HOME/.venvs/rapids_cuda12"
+else
+    VENV_PATH="$HOME/.venvs/rapids_cuda13"  # Default
+fi
 
 if [ -d "$VENV_PATH" ]; then
     source "$VENV_PATH/bin/activate"
