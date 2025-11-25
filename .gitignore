@@ -1,9 +1,10 @@
-# Data directories
-data/
-outputs/
-logs/
-figures/
-figures_*/
+# Data directories (only at root level, not in src/)
+/data/
+/outputs/
+/logs/
+/figures/
+/figures_*/
+/models/
 
 # Python
 __pycache__/
