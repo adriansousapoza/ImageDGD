@@ -1,10 +1,12 @@
 # Data directories (only at root level, not in src/)
 /data/
+/notebooks/data/
 /outputs/
 /logs/
 /figures/
 /figures_*/
 /models/
+/rapids_cuda13/
 
 # Python
 __pycache__/
