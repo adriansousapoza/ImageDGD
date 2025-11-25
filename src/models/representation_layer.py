@@ -18,7 +18,7 @@ class RepresentationLayer(nn.Module):
     that operate in d-dimensional space where d is the representation dimensionality.
     """
     
-    AVAILABLE_DISTS = ["normal", "uniform", "laplace", "student_t", "uniform_ball", "uniform_sphere", "logistic", "hyperbolic", "zeros"]
+    AVAILABLE_DISTS = ["normal", "uniform", "laplace", "student_t", "uniform_ball", "uniform_sphere", "logistic", "hyperbolic", "zeros", "pca"]
     
     def __init__(self, 
                  dim: int,
@@ -40,7 +40,7 @@ class RepresentationLayer(nn.Module):
             Reference tensor for shape derivation. Representations still sampled 
             from specified distribution.
         dist : str, default "normal"
-            Distribution for sampling: "normal", "uniform", "laplace", "student_t", "uniform_ball", "uniform_sphere", "logistic", "hyperbolic", "zeros".
+            Distribution for sampling: "normal", "uniform", "laplace", "student_t", "uniform_ball", "uniform_sphere", "logistic", "hyperbolic", "zeros", "pca".
         dist_params : dict, optional
             Distribution-specific parameters for multivariate distributions:
             - normal: mean (d-dim vector or scalar, default: zeros), cov (d×d matrix or scalar, default: identity)
@@ -51,6 +51,7 @@ class RepresentationLayer(nn.Module):
             - uniform_sphere: radius (scalar, default: 1.0)
             - logistic: loc (d-dim vector or scalar, default: zeros), scale (d-dim vector or scalar, default: ones)
             - hyperbolic: mu (d-dim vector or scalar, default: zeros), alpha (scalar, default: 1.5), beta (scalar, default: 0.0), delta (scalar, default: 1.0)
+            - pca: data (required tensor), whiten (bool, default: False), svd_solver (str, default: "auto")
             - zeros: none
             
             Note: When scalars are provided for vector/matrix parameters:
@@ -96,7 +97,8 @@ class RepresentationLayer(nn.Module):
             "uniform_sphere": self._get_rep_from_uniform_sphere,
             "zeros": self._get_rep_from_zeros,
             "logistic": self._get_rep_from_logistic,
-            "hyperbolic": self._get_rep_from_hyperbolic
+            "hyperbolic": self._get_rep_from_hyperbolic,
+            "pca": self._get_rep_from_pca
         }
         
         if dist not in dist_methods:
@@ -117,6 +119,59 @@ class RepresentationLayer(nn.Module):
         """
         z = nn.Parameter(torch.zeros(self._n_rep, self._dim, device=self.device), requires_grad=True)
         return z, {"dist_name": "zeros"}
+    
+    def _get_rep_from_pca(self, options: Dict[str, Any]) -> Tuple[Tensor, Dict[str, Any]]:
+        """Initialize representations from PCA projection of input data.
+        
+        Mathematical formulation:
+            Given data matrix X ∈ ℝⁿˣᵖ, compute PCA projection:
+            Z = (X - μ) * V_k
+            
+        Where:
+            - μ is the mean of X
+            - V_k contains the first k principal components
+            - k = dim (number of components)
+            
+        Parameters in options:
+            - data: torch.Tensor (required), shape (n_samples, n_features)
+            - whiten: bool (default: False), whether to whiten components
+            - svd_solver: str (default: "auto"), SVD solver method
+        """
+        if 'data' not in options:
+            raise ValueError("PCA initialization requires 'data' parameter in dist_params")
+        
+        data = options['data']
+        if not isinstance(data, torch.Tensor):
+            raise TypeError("Data must be a torch.Tensor")
+        
+        # Reshape to 2D if needed
+        if len(data.shape) > 2:
+            n_samples = data.shape[0]
+            data = data.reshape(n_samples, -1)
+        
+        if data.shape[0] != self._n_rep:
+            raise ValueError(f"Number of data samples ({data.shape[0]}) must match n_samples ({self._n_rep})")
+        
+        # Move data to device
+        data = data.to(self.device)
+        
+        # Get PCA parameters
+        whiten = options.get('whiten', False)
+        svd_solver = options.get('svd_solver', 'auto')
+        
+        # Apply PCA
+        pca = TorchPCA(n_components=self._dim, whiten=whiten, svd_solver=svd_solver)
+        transformed_data = pca.fit_transform(data)
+        
+        # Create parameter from transformed data
+        z = nn.Parameter(transformed_data.clone(), requires_grad=True)
+        
+        return z, {
+            "dist_name": "pca",
+            "whiten": whiten,
+            "svd_solver": svd_solver,
+            "explained_variance_ratio": pca.explained_variance_ratio_.tolist() if pca.explained_variance_ratio_ is not None else None
+        }
     
     def _get_rep_from_uniform(self, options: Dict[str, Any]) -> Tuple[Tensor, Dict[str, Any]]:
         """Sample representations from multivariate uniform distribution.

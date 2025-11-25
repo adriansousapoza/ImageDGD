@@ -6,28 +6,57 @@ random_seed: 42
 experiment_name: "ImageDGD_Default"
 description: "Default ImageDGD training configuration"
 
+# ClearML configuration
+clearml:
+  enabled: false
+  project_name: "ImageDGD"
+  task_name: "Default_Training"
+  tags: ["default", "production"]
+
+
 # Data configuration
 data:
-  dataset: "FashionMNIST"
-  data_dir: "./data"
-  batch_size: 128
-  num_workers: 4
+  dataset_name: "FashionMNIST"
+  root_dir: "./data"
+  batch_size: 64
+  num_workers: 1
   pin_memory: true
-  use_subset: false
-  subset_fraction: 1.0
+  total_subset_fraction: 0.2
+  test_split: 0.5
   normalize: true
+  download: true
+  shuffle_train: true
+  shuffle_test: false
+  
+  # Data transforms
+  transforms:
+    train: ['ToTensor', 'Normalize']
+    test: ['ToTensor', 'Normalize']
+  
+  # Class names for FashionMNIST
+  class_names:
+    - 'Ankle boot'
+    - 'Bag'
+    - 'Coat'
+    - 'Dress'
+    - 'Pullover'
+    - 'Sandal'
+    - 'Shirt'
+    - 'Sneaker'
+    - 'T-shirt/top'
+    - 'Trouser'
   
 # Model configuration
 model:
   # Representation layer configuration
   representation:
-    n_features: 2
-    distribution: "uniform_ball"
+    n_features: 8
+    distribution: "uniform_ball"  # Options: normal, uniform, uniform_ball, uniform_sphere, laplace, student_t, logistic, hyperbolic, zeros, pca
     dist_params: {'radius': 1.0}
   
   # Decoder configuration
   decoder:
-    hidden_dims: [128, 64, 32]
+    hidden_dims: [32, 16]
     output_channels: 1
     output_size: [28, 28]
     init_size: [4, 4]
@@ -48,63 +77,56 @@ model:
   # GMM configuration
   gmm:
     n_components: 20
-    n_features: null  # If None, inferred from data
-    covariance_type: "full"  # 'full', 'diag', 'spherical', 'tied_full', 'tied_diag', 'tied_spherical'
+    n_features: null
+    covariance_type: "spherical"
     max_iter: 1000
     tol: 1e-4
     reg_covar: 1e-6
-    n_init: 1  # Number of random initializations
-    init_means: "kmeans"  # 'kmeans', 'kpp', 'random', 'points', 'maxdist' or tensor
-    init_weights: "uniform"  # 'uniform', 'random', 'kmeans' or tensor
-    init_covariances: "empirical"  # 'empirical', 'eye', 'random', 'global' or tensor
-    random_state: null  # Random seed for reproducibility
-    warm_start: false
-    cem: false  # Use Classification EM instead of standard EM
-    weight_concentration_prior: null  # Dirichlet prior for weights (MAP)
-    mean_prior: null  # Prior for means (MAP)
-    mean_precision_prior: null  # Precision of mean prior (MAP)
-    covariance_prior: null  # Prior for covariances (MAP)
-    degrees_of_freedom_prior: null  # Degrees of freedom for Wishart prior (MAP)
+    n_init: 1
+    init_means: "kmeans"
+    init_weights: "uniform"
+    init_covariances: "empirical"
+    warm_start: true
+    cem: false
+    weight_concentration_prior: null
+    mean_prior: null
+    mean_precision_prior: null
+    covariance_prior: null
+    degrees_of_freedom_prior: null
     verbose: false
     verbose_interval: 10
-    device: null  # 'cpu', 'cuda', or None (auto-detect)
 
 # Training configuration
 training:
   epochs: 200
   device: "auto"
   
+  # Early stopping
+  early_stopping_patience: 10
+  
   # GMM training schedule
   first_epoch_gmm: 50
   refit_gmm_interval: 50
   lambda_gmm: 1.0
+  final_gmm_fit: true
   
-  # Optimizer configuration
+  # Optimizer configuration (AdamW)
   optimizer:
     decoder:
-      type: "AdamW"
-      lr: 0.001
+      lr: 0.005
       weight_decay: 0.01
       betas: [0.9, 0.999]
       eps: 1e-8
+      amsgrad: false
     representation:
-      type: "AdamW"
-      lr: 0.01
+      lr: 0.05
       weight_decay: 0.0
       betas: [0.9, 0.999]
       eps: 1e-8
+      amsgrad: false
   
-  # Logging configuration
-  logging:
-    log_interval: 1
-    plot_interval: 50
-    save_figures: true
-    figure_format: "png"
-    dpi: 150
-
-# ClearML configuration
-clearml:
-  enabled: true
-  project_name: "ImageDGD"
-  task_name: "Default_Training"
-  tags: ["default", "production"]
+  # Learning rate scheduler
+  lr_scheduler:
+    enabled: true
+    warmup_epochs: 10  # Linear warmup for this many epochs
+    eta_min: 1e-6  # Minimum learning rate for cosine annealing

@@ -12,26 +12,10 @@ from omegaconf import DictConfig
 from tqdm import tqdm
 import numpy as np
 
-# Additional optimizers
-try:
-    from lion_pytorch import Lion
-    LION_AVAILABLE = True
-except ImportError:
-    LION_AVAILABLE = False
-    Lion = None
-
-try:
-    from sophia import SophiaG
-    SOPHIA_AVAILABLE = True
-except ImportError:
-    SOPHIA_AVAILABLE = False
-    SophiaG = None
-
 # Import tgmm package for Gaussian Mixture Model
 from tgmm import GaussianMixture
 
 from ..models import RepresentationLayer, DGD, ConvDecoder
-from ..visualization import LatentSpaceVisualizer, plot_training_losses, plot_images, plot_gmm_images, plot_gmm_samples
 
 
 class DGDTrainer:
@@ -54,11 +38,15 @@ class DGDTrainer:
         self.training_config = config.training
         self.verbose = verbose
         
-        # Initialize ClearML task
-        self.task = Task.current_task()
-        if self.task is None:
-            # If no task is already initialized, create one
-            self.task = Task.init(project_name="ImageDGD", task_name="DGD Training")
+        # Initialize ClearML task only if enabled in config
+        self.task = None
+        if hasattr(config, 'clearml') and config.clearml.enabled:
+            self.task = Task.current_task()
+            if self.task is None:
+                # If no task is already initialized, create one
+                project_name = config.clearml.get('project_name', 'ImageDGD')
+                task_name = config.clearml.get('task_name', 'DGD Training')
+                self.task = Task.init(project_name=project_name, task_name=task_name)
         
         # Initialize tracking lists
         self.train_losses = []
@@ -68,11 +56,15 @@ class DGDTrainer:
         self.recon_train_losses = []
         self.recon_test_losses = []
         
-        # Initialize visualizer
-        self.visualizer = LatentSpaceVisualizer()
-        
         # Timing
         self.epoch_times = []
+        
+        # Early stopping (based on training loss)
+        # Note: Early stopping only starts after GMM is fitted to avoid false triggers
+        self.best_train_loss = float('inf')
+        self.epochs_without_improvement = 0
+        self.best_epoch = 0
+        self.early_stopping_active = False  # Only activate after first GMM fit
         
     def _calc_improvement(self, loss_list: List[float]) -> float:
         """Calculate percentage improvement compared to previous epoch."""
@@ -91,32 +83,89 @@ class DGDTrainer:
         nsample_test = len(test_loader.dataset)
         
         # Create representation layers
+        distribution = model_config.representation.distribution
+        
         # Prepare distribution parameters based on the distribution type
         dist_params = {}
-        if hasattr(model_config.representation, 'radius'):
-            dist_params['radius'] = model_config.representation.radius
         
-        # Handle other potential distribution parameters
-        for param in ['mean', 'cov', 'low', 'high', 'loc', 'scale', 'scale_matrix', 
-                     'rate', 'df', 'mu', 'alpha', 'beta', 'delta']:
-            if hasattr(model_config.representation, param):
-                dist_params[param] = getattr(model_config.representation, param)
+        # Special handling for PCA initialization
+        if distribution == 'pca':
+            if self.verbose:
+                print("Initializing representations with PCA...")
+            
+            # Collect all training data
+            train_data = []
+            for batch in train_loader:
+                if isinstance(batch, (list, tuple)):
+                    images = batch[0]
+                else:
+                    images = batch
+                train_data.append(images)
+            train_data = torch.cat(train_data, dim=0).to(self.device)
+            
+            # Flatten images for PCA
+            n_samples = train_data.shape[0]
+            train_data_flat = train_data.reshape(n_samples, -1)
+            
+            # Ensure float dtype for PCA
+            if train_data_flat.dtype in [torch.long, torch.int, torch.int32, torch.int64]:
+                train_data_flat = train_data_flat.float()
+            
+            # Add PCA-specific parameters
+            dist_params['data'] = train_data_flat
+            # Get PCA params from dist_params if present, otherwise use defaults
+            dist_params['whiten'] = dist_params.get('whiten', False)
+            dist_params['svd_solver'] = dist_params.get('svd_solver', 'auto')
+            
+            if self.verbose:
+                print(f"   PCA parameters: whiten={dist_params['whiten']}, svd_solver={dist_params['svd_solver']}")
+        else:
+            # Handle standard distribution parameters
+            if hasattr(model_config.representation, 'radius'):
+                dist_params['radius'] = model_config.representation.radius
+            
+            # Handle other potential distribution parameters
+            for param in ['mean', 'cov', 'low', 'high', 'loc', 'scale', 'scale_matrix', 
+                         'rate', 'df', 'mu', 'alpha', 'beta', 'delta']:
+                if hasattr(model_config.representation, param):
+                    dist_params[param] = getattr(model_config.representation, param)
         
         rep = RepresentationLayer(
             dim=model_config.representation.n_features,
             n_samples=nsample_train,
-            dist=model_config.representation.distribution,
+            dist=distribution,
             dist_params=dist_params,
             device=self.device
         )
         
-        test_rep = RepresentationLayer(
-            dim=model_config.representation.n_features,
-            n_samples=nsample_test,
-            dist=model_config.representation.distribution,
-            dist_params=dist_params,
-            device=self.device
-        )
+        if distribution == 'pca' and self.verbose:
+            explained_var = rep._options.get('explained_variance_ratio', None)
+            if explained_var:
+                total_var = sum(explained_var) * 100
+                print(f"   PCA explained variance: {total_var:.2f}% (top {len(explained_var)} components)")
+                print(f"   Per component: {[f'{v*100:.2f}%' for v in explained_var[:5]]}")
+        
+        # Create test representation layer
+        # For PCA initialization, we use normal distribution for test set
+        # since we can't apply the same PCA transform (different sample size)
+        if distribution == 'pca':
+            if self.verbose:
+                print("   Initializing test representations with normal distribution...")
+            test_rep = RepresentationLayer(
+                dim=model_config.representation.n_features,
+                n_samples=nsample_test,
+                dist='normal',  # Use normal for test set
+                dist_params={},
+                device=self.device
+            )
+        else:
+            test_rep = RepresentationLayer(
+                dim=model_config.representation.n_features,
+                n_samples=nsample_test,
+                dist=distribution,
+                dist_params=dist_params,
+                device=self.device
+            )
         
         # Create decoder
         decoder = ConvDecoder(
@@ -133,7 +182,7 @@ class DGDTrainer:
         # Create GMM
         gmm = GaussianMixture(
             n_components=model_config.gmm.n_components,
-            n_features=model_config.gmm.n_features if model_config.gmm.n_features else model_config.representation.n_features,
+            n_features=model_config.representation.n_features,
             covariance_type=model_config.gmm.covariance_type,
             max_iter=model_config.gmm.max_iter,
             tol=model_config.gmm.tol,
@@ -142,7 +191,7 @@ class DGDTrainer:
             init_means=model_config.gmm.init_means,
             init_weights=model_config.gmm.init_weights,
             init_covariances=model_config.gmm.init_covariances,
-            random_state=model_config.gmm.random_state if model_config.gmm.random_state else self.config.random_seed,
+            random_state=self.config.random_seed,
             warm_start=model_config.gmm.warm_start,
             cem=model_config.gmm.cem,
             weight_concentration_prior=model_config.gmm.weight_concentration_prior,
@@ -152,7 +201,7 @@ class DGDTrainer:
             degrees_of_freedom_prior=model_config.gmm.degrees_of_freedom_prior,
             verbose=model_config.gmm.verbose,
             verbose_interval=model_config.gmm.verbose_interval,
-            device=model_config.gmm.device if model_config.gmm.device else self.device,
+            device=self.device,
         )
         
         # Create full model
@@ -160,177 +209,94 @@ class DGDTrainer:
         
         return model, rep, test_rep, gmm
     
-    def _get_optimizer_class(self, optimizer_name: str):
-        """Get optimizer class by name with support for PyTorch, Lion, and Sophia optimizers."""
-        optimizer_name = optimizer_name.lower()
-        
-        # PyTorch optimizers
-        pytorch_optimizers = {
-            'adadelta': torch.optim.Adadelta,
-            'adagrad': torch.optim.Adagrad,
-            'adam': torch.optim.Adam,
-            'adamw': torch.optim.AdamW,
-            'sparseadam': torch.optim.SparseAdam,
-            'adamax': torch.optim.Adamax,
-            'asgd': torch.optim.ASGD,
-            'lbfgs': torch.optim.LBFGS,
-            'nadam': torch.optim.NAdam,
-            'radam': torch.optim.RAdam,
-            'rmsprop': torch.optim.RMSprop,
-            'rprop': torch.optim.Rprop,
-            'sgd': torch.optim.SGD,
-        }
-        
-        # Additional optimizers
-        additional_optimizers = {}
-        if LION_AVAILABLE:
-            additional_optimizers['lion'] = Lion
-        if SOPHIA_AVAILABLE:
-            additional_optimizers['sophia'] = SophiaG
-            additional_optimizers['sophiag'] = SophiaG
-        
-        all_optimizers = {**pytorch_optimizers, **additional_optimizers}
-        
-        if optimizer_name in all_optimizers:
-            return all_optimizers[optimizer_name]
-        
-        # If not found, try to get from torch.optim dynamically
-        if hasattr(torch.optim, optimizer_name.upper()):
-            return getattr(torch.optim, optimizer_name.upper())
-        elif hasattr(torch.optim, optimizer_name.capitalize()):
-            return getattr(torch.optim, optimizer_name.capitalize())
-        
-        available_opts = list(all_optimizers.keys())
-        raise ValueError(f"Unknown optimizer '{optimizer_name}'. Available optimizers: {available_opts}")
-    
-    def _create_optimizer(self, optimizer_class, parameters, config):
-        """Create optimizer instance with proper parameter filtering."""
-        # Get optimizer signature to filter supported parameters
-        import inspect
-        sig = inspect.signature(optimizer_class.__init__)
-        supported_params = set(sig.parameters.keys()) - {'self', 'params'}
-        
-        # Filter config to only include supported parameters
-        filtered_config = {}
-        for key, value in config.items():
-            if key == 'type':
-                continue
-            if key in supported_params:
-                filtered_config[key] = value
-            else:
-                print(f"Warning: Parameter '{key}' not supported by {optimizer_class.__name__}, ignoring.")
-        
-        return optimizer_class(parameters, **filtered_config)
-
     def _create_optimizers(self, model, rep, test_rep) -> List:
-        """Create optimizers based on configuration with support for all PyTorch optimizers plus Lion and Sophia."""
+        """Create AdamW optimizers based on configuration."""
         training_config = self.training_config
         
-        # Decoder optimizer
+        # Decoder optimizer (AdamW)
         decoder_config = training_config.optimizer.decoder
-        decoder_optimizer_class = self._get_optimizer_class(decoder_config.type)
-        decoder_optimizer = self._create_optimizer(
-            decoder_optimizer_class, 
-            model.decoder.parameters(), 
-            decoder_config
+        decoder_optimizer = torch.optim.AdamW(
+            model.decoder.parameters(),
+            lr=decoder_config.lr,
+            betas=tuple(decoder_config.betas),
+            eps=decoder_config.eps,
+            weight_decay=decoder_config.weight_decay,
+            amsgrad=decoder_config.get('amsgrad', False)
         )
         
-        # Representation optimizers
+        # Representation optimizers (AdamW)
         rep_config = training_config.optimizer.representation
-        rep_optimizer_class = self._get_optimizer_class(rep_config.type)
-        
-        trainrep_optimizer = self._create_optimizer(
-            rep_optimizer_class,
+        trainrep_optimizer = torch.optim.AdamW(
             rep.parameters(),
-            rep_config
+            lr=rep_config.lr,
+            betas=tuple(rep_config.betas),
+            eps=rep_config.eps,
+            weight_decay=rep_config.weight_decay,
+            amsgrad=rep_config.get('amsgrad', False)
         )
         
-        testrep_optimizer = self._create_optimizer(
-            rep_optimizer_class,
+        testrep_optimizer = torch.optim.AdamW(
             test_rep.parameters(),
-            rep_config
+            lr=rep_config.lr,
+            betas=tuple(rep_config.betas),
+            eps=rep_config.eps,
+            weight_decay=rep_config.weight_decay,
+            amsgrad=rep_config.get('amsgrad', False)
         )
         
         return [decoder_optimizer, trainrep_optimizer, testrep_optimizer]
     
+    def _create_schedulers(self, optimizers, total_epochs: int) -> List:
+        """Create learning rate schedulers with warmup and cosine annealing."""
+        lr_config = self.training_config.lr_scheduler
+        
+        if not lr_config.get('enabled', False):
+            return [None, None, None]
+        
+        warmup_epochs = lr_config.get('warmup_epochs', 0)
+        eta_min = lr_config.get('eta_min', 0)
+        
+        schedulers = []
+        for optimizer in optimizers:
+            # Get initial learning rate
+            initial_lr = optimizer.param_groups[0]['lr']
+            
+            # Create cosine annealing scheduler for epochs after warmup
+            cosine_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+                optimizer,
+                T_max=total_epochs - warmup_epochs,
+                eta_min=eta_min
+            )
+            
+            if warmup_epochs > 0:
+                # Create linear warmup scheduler
+                warmup_scheduler = torch.optim.lr_scheduler.LinearLR(
+                    optimizer,
+                    start_factor=0.01,  # Start at 1% of initial LR
+                    end_factor=1.0,     # End at 100% of initial LR
+                    total_iters=warmup_epochs
+                )
+                
+                # Chain warmup then cosine annealing
+                scheduler = torch.optim.lr_scheduler.SequentialLR(
+                    optimizer,
+                    schedulers=[warmup_scheduler, cosine_scheduler],
+                    milestones=[warmup_epochs]
+                )
+            else:
+                scheduler = cosine_scheduler
+            
+            schedulers.append(scheduler)
+        
+        return schedulers
+    
     def _log_metrics(self, epoch: int, metrics: Dict[str, float]):
         """Log metrics to ClearML."""
+        if self.task is None:
+            return
         logger = self.task.get_logger()
         for metric_name, value in metrics.items():
             logger.report_scalar("metrics", metric_name, value, iteration=epoch)
-    
-    def _should_plot(self, epoch: int) -> bool:
-        """Check if should plot at current epoch."""
-        plot_interval = self.training_config.logging.plot_interval
-        return (epoch % plot_interval == 0 or 
-                epoch == self.training_config.epochs or 
-                epoch == 1)
-    
-    def _plot_visualizations(self, epoch: int, model, rep, test_rep, gmm, 
-                           sample_data, class_names):
-        """Generate and save visualizations."""
-        if not self._should_plot(epoch):
-            return
-            
-        indices_train, images_train, labels_train, indices_test, images_test, labels_test = sample_data
-        
-        with torch.no_grad():
-            # Plot reconstructed images
-            z_train = rep(indices_train)
-            reconstructions_train = model.decoder(z_train)
-            plot_images(reconstructions_train.cpu(), labels_train.cpu(), 
-                       "Reconstructed Train Images", epoch=epoch)
-            
-            z_test = test_rep(indices_test)
-            reconstructions_test = model.decoder(z_test)
-            plot_images(reconstructions_test.cpu(), labels_test.cpu(), 
-                       "Reconstructed Test Images", epoch=epoch)
-            
-            # Plot GMM visualizations (only after GMM is fitted)
-            first_epoch_gmm = self.training_config.first_epoch_gmm
-            if epoch >= first_epoch_gmm and gmm is not None:
-                plot_gmm_images(
-                    model.decoder, gmm, "GMM Component Means (by weight)",
-                    epoch=epoch, top_n=self.config.model.gmm.n_components, 
-                    device=self.device
-                )
-                plot_gmm_samples(
-                    model.decoder, gmm, "Generated Images from GMM Samples",
-                    n_samples=self.config.model.gmm.n_components, 
-                    epoch=epoch, device=self.device
-                )
-                
-            # Plot latent space visualizations
-            if gmm is not None and (epoch == 1 or epoch == first_epoch_gmm or self._should_plot(epoch)):
-                z_train_all = rep.z.detach()
-                z_test_all = test_rep.z.detach()
-                
-                # Get all labels for visualization
-                labels_train_all = torch.tensor([label for _, _, label in self.train_dataset])
-                labels_test_all = torch.tensor([label for _, _, label in self.test_dataset])
-                
-                # Plot different dimensionality reduction techniques
-                self.visualizer.visualize(
-                    z_train_all, labels_train_all, z_test_all, labels_test_all, gmm,
-                    method='pca', title="Latent Space - PCA",
-                    label_names=class_names, epoch=epoch
-                )
-                
-                self.visualizer.visualize(
-                    z_train_all, labels_train_all, z_test_all, labels_test_all, gmm,
-                    method='tsne', perplexity=30, n_iter=1000,
-                    title="Latent Space - t-SNE",
-                    random_state=self.config.random_seed,
-                    label_names=class_names, epoch=epoch
-                )
-                
-                self.visualizer.visualize(
-                    z_train_all, labels_train_all, z_test_all, labels_test_all, gmm,
-                    method='umap', n_neighbors=20, n_components=2, min_dist=0.01,
-                    title="Latent Space - UMAP",
-                    random_state=self.config.random_seed,
-                    label_names=class_names, epoch=epoch
-                )
     
     def train(self, train_loader, test_loader, sample_data, class_names) -> Dict[str, Any]:
         """
@@ -358,6 +324,10 @@ class DGDTrainer:
         optimizers = self._create_optimizers(model, rep, test_rep)
         decoder_optimizer, trainrep_optimizer, testrep_optimizer = optimizers
         
+        # Create learning rate schedulers
+        schedulers = self._create_schedulers(optimizers, self.training_config.epochs)
+        decoder_scheduler, trainrep_scheduler, testrep_scheduler = schedulers
+        
         # Log model parameters
         decoder_params = sum(p.numel() for p in model.decoder.parameters() if p.requires_grad)
         rep_params = sum(p.numel() for p in rep.parameters() if p.requires_grad)
@@ -374,17 +344,16 @@ class DGDTrainer:
             print(f"Training for {self.training_config.epochs} epochs")
             print(f"Using device: {self.device}")
             print(f"Batch size: {self.config.data.batch_size}")
-            if self.config.data.use_subset:
-                print(f"Using data subset: {self.config.data.subset_fraction:.1%}")
         
         # ClearML logging
-        self.task.connect(self.config)  # Connect the configuration
-        self.task.set_parameters({
-            "decoder_params": decoder_params,
-            "rep_params": rep_params,
-            "test_rep_params": test_rep_params,
-            "total_params": decoder_params + rep_params + test_rep_params
-        })
+        if self.task is not None:
+            self.task.connect(self.config)  # Connect the configuration
+            self.task.set_parameters({
+                "decoder_params": decoder_params,
+                "rep_params": rep_params,
+                "test_rep_params": test_rep_params,
+                "total_params": decoder_params + rep_params + test_rep_params
+            })
         
         # Training loop
         start_time = time.time()
@@ -405,14 +374,19 @@ class DGDTrainer:
             refit_gmm_interval = self.training_config.refit_gmm_interval
             
             if epoch == first_epoch_gmm or (refit_gmm_interval and epoch % refit_gmm_interval == 0):
-                if self.verbose:
-                    print(f"Fitting GMM at epoch {epoch}...")
+                print(f"Fitting GMM at epoch {epoch}...")
                 with torch.no_grad():
                     representations = rep.z.detach()
                     gmm.fit(representations, max_iter=1000 if epoch == first_epoch_gmm else 100)
+                
+                # Activate early stopping after first GMM fit
+                if epoch == first_epoch_gmm:
+                    self.early_stopping_active = True
+                    self.best_train_loss = float('inf')  # Reset best loss
+                    self.epochs_without_improvement = 0
+                    if self.verbose:
+                        print(f"   Early stopping activated from epoch {epoch} onwards")
             elif epoch > first_epoch_gmm:
-                if self.verbose and epoch % (refit_gmm_interval or 10) == 0:
-                    print(f"Re-Fitting GMM at epoch {epoch}...")
                 with torch.no_grad():
                     representations = rep.z.detach()
                     gmm.fit(representations, max_iter=100, warm_start=True)
@@ -490,6 +464,14 @@ class DGDTrainer:
             
             testrep_optimizer.step()
             
+            # Step learning rate schedulers
+            if decoder_scheduler is not None:
+                decoder_scheduler.step()
+            if trainrep_scheduler is not None:
+                trainrep_scheduler.step()
+            if testrep_scheduler is not None:
+                testrep_scheduler.step()
+            
             # Normalize losses
             train_loss /= len(train_loader.dataset)
             test_loss /= len(test_loader.dataset)
@@ -505,6 +487,16 @@ class DGDTrainer:
             self.recon_test_losses.append(recon_test_loss)
             self.gmm_train_losses.append(gmm_train_loss)
             self.gmm_test_losses.append(gmm_test_loss)
+            
+            # Early stopping check (based on training loss)
+            # Only check if early stopping is active (after first GMM fit)
+            if self.early_stopping_active:
+                if train_loss < self.best_train_loss:
+                    self.best_train_loss = train_loss
+                    self.best_epoch = epoch
+                    self.epochs_without_improvement = 0
+                else:
+                    self.epochs_without_improvement += 1
             
             # Calculate timing
             epoch_duration = time.time() - epoch_start_time
@@ -524,42 +516,48 @@ class DGDTrainer:
                 "gmm_train_loss": gmm_train_loss,
                 "gmm_test_loss": gmm_test_loss,
                 "epoch_time": epoch_duration,
-                "estimated_time_remaining": estimated_time_remaining
+                "estimated_time_remaining": estimated_time_remaining,
+                "lr_decoder": decoder_optimizer.param_groups[0]['lr'],
+                "lr_representation": trainrep_optimizer.param_groups[0]['lr']
             }
             self._log_metrics(epoch, metrics)
             
-            # Print progress
-            if (self.verbose and epoch % self.training_config.logging.log_interval == 0) or \
-               (not self.verbose and epoch % (self.training_config.logging.log_interval * 5) == 0):
-                epoch_time_str = str(timedelta(seconds=int(epoch_duration)))
-                remaining_time_str = str(timedelta(seconds=int(estimated_time_remaining)))
-                
-                if self.verbose:
-                    print(f"Epoch {epoch}/{self.training_config.epochs} "
-                          f"[TPE: {epoch_time_str}, RT: {remaining_time_str}]; "
-                          f"Train Loss: {train_loss:.4f} ({self._calc_improvement(self.train_losses):.2f}%), "
-                          f"Test Loss: {test_loss:.4f} ({self._calc_improvement(self.test_losses):.2f}%)")
-                    print(f"  Reconstruction - Train: {recon_train_loss:.4f}, Test: {recon_test_loss:.4f}")
-                    if epoch >= first_epoch_gmm:
-                        print(f"  GMM Loss - Train: {gmm_train_loss:.4f}, Test: {gmm_test_loss:.4f}")
-                else:
-                    # Compact output for non-verbose mode
-                    print(f"Epoch {epoch}/{self.training_config.epochs}: "
-                          f"Train={train_loss:.4f}, Test={test_loss:.4f}, "
-                          f"Time={epoch_time_str}")
+            epoch_time_str = str(timedelta(seconds=int(epoch_duration)))
+            remaining_time_str = str(timedelta(seconds=int(estimated_time_remaining)))
+            train_loss_improv = self._calc_improvement(self.train_losses)
+            test_loss_improv = self._calc_improvement(self.test_losses)
+            train_recon_improv = self._calc_improvement(self.recon_train_losses)
+            test_recon_improv = self._calc_improvement(self.recon_test_losses)
+            train_gmm_improv = self._calc_improvement(self.gmm_train_losses) if epoch >= first_epoch_gmm else 0.0
+            test_gmm_improv = self._calc_improvement(self.gmm_test_losses) if epoch >= first_epoch_gmm else 0.0
             
-            # Plot visualizations
-            if self.training_config.logging.save_figures:
-                self._plot_visualizations(epoch, model, rep, test_rep, gmm, sample_data, class_names)
-                
-                # Plot loss curves
-                if self._should_plot(epoch):
-                    plot_training_losses(
-                        self.train_losses, self.test_losses,
-                        self.recon_train_losses, self.recon_test_losses,
-                        self.gmm_train_losses, self.gmm_test_losses,
-                        title=f"Training Losses at Epoch {epoch}"
-                    )
+            # Get current learning rates
+            lr_decoder = decoder_optimizer.param_groups[0]['lr']
+            lr_rep = trainrep_optimizer.param_groups[0]['lr']
+            
+            print(f"Epoch {epoch}/{self.training_config.epochs} [Time per Epoch: {epoch_time_str}, Remaining Time: {remaining_time_str}, LR: Dec={lr_decoder:.2e}, Rep={lr_rep:.2e}]")
+            print(f"       - Train Loss: {train_loss:.4f} ({train_loss_improv:+.2f}%), Recon: {recon_train_loss:.4f} ({train_recon_improv:+.2f}%), GMM: {gmm_train_loss:.4f} ({train_gmm_improv:+.2f}%)")
+            print(f"       - Test  Loss: {test_loss:.4f} ({test_loss_improv:+.2f}%), Recon: {recon_test_loss:.4f} ({test_recon_improv:+.2f}%), GMM: {gmm_test_loss:.4f} ({test_gmm_improv:+.2f}%)")
+
+            # Check for early stopping (only if active)
+            early_stopping_patience = getattr(self.training_config, 'early_stopping_patience', None)
+            if self.early_stopping_active and early_stopping_patience is not None and self.epochs_without_improvement >= early_stopping_patience:
+                if self.verbose:
+                    print(f"\nEarly stopping triggered after {epoch} epochs")
+                    print(f"   No improvement in train loss for {early_stopping_patience} consecutive epochs (since GMM activation)")
+                    print(f"   Best train loss: {self.best_train_loss:.4f} at epoch {self.best_epoch}")
+                break
+        
+        # Final GMM fit after training completes (for best generative model)
+        final_gmm_fit = getattr(self.training_config, 'final_gmm_fit', False)
+        if final_gmm_fit:
+            if self.verbose:
+                print(f"\nPerforming final GMM fit for optimal generative model...")
+            with torch.no_grad():
+                representations = rep.z.detach()
+                gmm.fit(representations, max_iter=self.config.model.gmm.max_iter)
+            if self.verbose:
+                print(f"   Final GMM converged: {gmm.converged_} (iterations: {gmm.n_iter_})")
         
         # Training complete
         total_time = time.time() - start_time
@@ -567,6 +565,7 @@ class DGDTrainer:
             print(f"Training completed in {str(timedelta(seconds=int(total_time)))}")
             print(f"Final training loss: {self.train_losses[-1]:.4f}")
             print(f"Final test loss: {self.test_losses[-1]:.4f}")
+            print(f"Best train loss: {self.best_train_loss:.4f} at epoch {self.best_epoch}")
         else:
             print(f"Training completed: {self.train_losses[-1]:.4f} train, {self.test_losses[-1]:.4f} test")
         
@@ -580,5 +579,8 @@ class DGDTrainer:
             "test_losses": self.test_losses,
             "total_time": total_time,
             "final_train_loss": self.train_losses[-1],
-            "final_test_loss": self.test_losses[-1]
+            "final_test_loss": self.test_losses[-1],
+            "best_train_loss": self.best_train_loss,
+            "best_epoch": self.best_epoch,
+            "stopped_early": self.epochs_without_improvement >= getattr(self.training_config, 'early_stopping_patience', float('inf'))
         }
