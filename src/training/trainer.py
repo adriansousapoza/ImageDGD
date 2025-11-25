@@ -90,14 +90,11 @@ class DGDTrainer:
         
         # Special handling for PCA initialization
         if distribution == 'pca':
-            if self.verbose:
-                print("Initializing representations with PCA...")
-            
             # Collect all training data
             train_data = []
             for batch in train_loader:
                 if isinstance(batch, (list, tuple)):
-                    images = batch[0]
+                    images = batch[1]
                 else:
                     images = batch
                 train_data.append(images)
@@ -113,12 +110,10 @@ class DGDTrainer:
             
             # Add PCA-specific parameters
             dist_params['data'] = train_data_flat
-            # Get PCA params from dist_params if present, otherwise use defaults
-            dist_params['whiten'] = dist_params.get('whiten', False)
-            dist_params['svd_solver'] = dist_params.get('svd_solver', 'auto')
-            
-            if self.verbose:
-                print(f"   PCA parameters: whiten={dist_params['whiten']}, svd_solver={dist_params['svd_solver']}")
+            # Get PCA params from config if present, otherwise use defaults
+            config_dist_params = model_config.representation.get('dist_params', {})
+            dist_params['whiten'] = config_dist_params.get('whiten', False)
+            dist_params['svd_solver'] = config_dist_params.get('svd_solver', 'auto')
         else:
             # Handle standard distribution parameters
             if hasattr(model_config.representation, 'radius'):

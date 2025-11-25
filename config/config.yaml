@@ -52,7 +52,11 @@ model:
   representation:
     n_features: 8
     distribution: "uniform_ball"  # Options: normal, uniform, uniform_ball, uniform_sphere, laplace, student_t, logistic, hyperbolic, zeros, pca
-    dist_params: {'radius': 1.0}
+    dist_params: {'radius': 0.1}
+    # Distribution-specific parameters examples:
+    # uniform_ball: {'radius': 0.1}
+    # normal: {'mean': 0, 'cov': 1}
+    # pca: {'whiten': false, 'svd_solver': 'auto'}
   
   # Decoder configuration
   decoder:
@@ -105,7 +109,7 @@ training:
   early_stopping_patience: 10
   
   # GMM training schedule
-  first_epoch_gmm: 50
+  first_epoch_gmm: 0
   refit_gmm_interval: 50
   lambda_gmm: 1.0
   final_gmm_fit: true
