@@ -397,6 +397,9 @@ class DGDTrainer:
                 
                 # Forward pass
                 z = rep(index)
+
+                # TODO: Add noise here
+
                 y = model.decoder(z)
                 recon_loss = F.mse_loss(y, x, reduction='sum')
                 
