@@ -21,7 +21,7 @@ data:
   batch_size: 64
   num_workers: 1
   pin_memory: true
-  total_subset_fraction: 0.2
+  total_subset_fraction: 1.0
   test_split: 0.5
   normalize: true
   download: true
@@ -60,7 +60,7 @@ model:
   
   # Decoder configuration
   decoder:
-    hidden_dims: [32, 16]
+    hidden_dims: [64, 32, 16]
     output_channels: 1
     output_size: [28, 28]
     init_size: [4, 4]
@@ -81,7 +81,7 @@ model:
   # GMM configuration
   gmm:
     n_components: 20
-    n_features: null
+    n_features: null # If null, uses representation n_features
     covariance_type: "spherical"
     max_iter: 1000
     tol: 1e-4
@@ -91,7 +91,7 @@ model:
     init_weights: "uniform"
     init_covariances: "empirical"
     warm_start: true
-    cem: false
+    cem: true
     weight_concentration_prior: null
     mean_prior: null
     mean_precision_prior: null
@@ -102,7 +102,7 @@ model:
 
 # Training configuration
 training:
-  epochs: 200
+  epochs: 50
   device: "auto"
   
   # Early stopping
