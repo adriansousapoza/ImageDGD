@@ -8,9 +8,5 @@ from .training import DGDTrainer
 from .visualization import (
     plot_images_by_class,
     plot_generated_samples,
-    plot_latent_umap,
-    plot_latent_tsne,
-    plot_latent_pca,
-    plot_latent_comparison,
-    extract_latent_codes
+    plot_latent_space
 )

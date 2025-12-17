@@ -150,7 +150,9 @@ def create_dataloaders(config: DictConfig) -> Tuple[DataLoader, DataLoader, List
         def __getitem__(self, idx):
             orig_idx = self.indices[idx]
             data, target = self.dataset[orig_idx]
-            return orig_idx, data, target
+            # Return sequential index (idx) instead of orig_idx
+            # This ensures indices match the RepresentationLayer size
+            return idx, data, target
     
     indexed_train_dataset = SubsetDataset(combined_dataset, train_indices)
     indexed_test_dataset = SubsetDataset(combined_dataset, test_indices)

@@ -51,7 +51,7 @@ class DGD(nn.Module):
             
         # Reconstruction
         x_recon = self.decoder(z)
-        recon_loss = F.mse_loss(x_recon, x, reduction='sum')
+        recon_loss = F.binary_cross_entropy(x_recon, x, reduction='sum')
         
         # GMM loss
         gmm_loss = 0
@@ -130,14 +130,12 @@ class ConvDecoder(BaseDecoder):
                  stride: int = 2,
                  padding: int = 1,
                  output_padding: int = 1,
-                 bias: bool = True,
                  normalization: str = 'batch',
                  use_batch_norm: bool = True,  # Deprecated, use normalization
                  activation: str = 'leaky_relu',
                  final_activation: str = 'sigmoid',
                  dropout_rate: float = 0.0,
                  upsampling_mode: str = 'transpose',
-                 use_spectral_norm: bool = False,
                  **kwargs) -> None:
         super(ConvDecoder, self).__init__()
         
@@ -225,10 +223,8 @@ class ConvDecoder(BaseDecoder):
         self.stride = stride
         self.padding = padding
         self.output_padding = output_padding
-        self.bias = bias
         self.normalization = normalization
         self.upsampling_mode = upsampling_mode
-        self.use_spectral_norm = use_spectral_norm
         
         # Convert Hydra ListConfig objects to regular Python tuples/lists
         # This is necessary because PyTorch layers expect native Python types
@@ -264,8 +260,9 @@ class ConvDecoder(BaseDecoder):
             for _ in range(num_upsamples + 1 - len(hidden_dims)):
                 hidden_dims.append(last_size // 2 if last_size > 8 else last_size)
         
-        # Reverse hidden_dims to go from smallest (latent) to largest (image)
-        hidden_dims.reverse()
+        # hidden_dims should be specified high→low (e.g., [128, 64, 32])
+        # This gives high capacity at low resolution (semantic) → low capacity at high resolution (spatial)
+        # No reversal needed - use as-is from config
         
         # Get the selected activation functions
         activation_fn = self.activations[activation]
@@ -288,7 +285,6 @@ class ConvDecoder(BaseDecoder):
                     stride=stride,
                     padding=padding,
                     output_padding=output_padding,
-                    bias=bias and normalization == 'none'
                 )
             else:
                 # Use regular convolution with separate upsampling
@@ -302,12 +298,7 @@ class ConvDecoder(BaseDecoder):
                     kernel_size=kernel_size,
                     stride=1,  # No stride with separate upsampling
                     padding=padding,
-                    bias=bias and normalization == 'none'
                 )
-            
-            # Apply spectral normalization if requested
-            if use_spectral_norm:
-                conv_layer = nn.utils.spectral_norm(conv_layer)
             
             # Build layer sequence
             layer_modules = []
@@ -350,7 +341,6 @@ class ConvDecoder(BaseDecoder):
                 stride=stride,
                 padding=padding,
                 output_padding=output_padding,
-                bias=bias and normalization == 'none'
             )
         else:
             # Use regular convolution with separate upsampling
@@ -364,12 +354,7 @@ class ConvDecoder(BaseDecoder):
                 kernel_size=kernel_size,
                 stride=1,
                 padding=padding,
-                bias=bias and normalization == 'none'
             )
-        
-        # Apply spectral normalization if requested
-        if use_spectral_norm:
-            final_conv1 = nn.utils.spectral_norm(final_conv1)
         
         final_modules.append(final_conv1)
         
@@ -388,9 +373,7 @@ class ConvDecoder(BaseDecoder):
         final_modules.append(activation_fn)
         
         # Final output convolution (no normalization, just output activation)
-        final_conv2 = nn.Conv2d(hidden_dims[-1], out_channels=output_channels, kernel_size=3, padding=1, bias=True)
-        if use_spectral_norm:
-            final_conv2 = nn.utils.spectral_norm(final_conv2)
+        final_conv2 = nn.Conv2d(hidden_dims[-1], out_channels=output_channels, kernel_size=3, padding=1)
         
         final_modules.extend([final_conv2, final_activation_fn])
         
