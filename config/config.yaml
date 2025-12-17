@@ -6,22 +6,14 @@ random_seed: 42
 experiment_name: "ImageDGD_Default"
 description: "Default ImageDGD training configuration"
 
-# ClearML configuration
-clearml:
-  enabled: false
-  project_name: "ImageDGD"
-  task_name: "Default_Training"
-  tags: ["default", "production"]
-
-
 # Data configuration
 data:
   dataset_name: "FashionMNIST"
   root_dir: "./data"
-  batch_size: 64
-  num_workers: 1
+  batch_size: 256
+  num_workers: 4
   pin_memory: true
-  total_subset_fraction: 1.0
+  total_subset_fraction: 0.2
   test_split: 0.5
   normalize: true
   download: true
@@ -30,8 +22,8 @@ data:
   
   # Data transforms
   transforms:
-    train: ['ToTensor', 'Normalize']
-    test: ['ToTensor', 'Normalize']
+    train: ['ToTensor']
+    test: ['ToTensor']
   
   # Class names for FashionMNIST
   class_names:
@@ -52,31 +44,34 @@ model:
   representation:
     n_features: 8
     distribution: "uniform_ball"  # Options: normal, uniform, uniform_ball, uniform_sphere, laplace, student_t, logistic, hyperbolic, zeros, pca
-    dist_params: {'radius': 0.1}
+    dist_params: {'radius': 1.0}
     # Distribution-specific parameters examples:
-    # uniform_ball: {'radius': 0.1}
-    # normal: {'mean': 0, 'cov': 1}
-    # pca: {'whiten': false, 'svd_solver': 'auto'}
+    # {'radius': 1.0} # uniform_ball
+    # {'radius': 1.0} # uniform_sphere
+    # {'mean': 0, 'cov': 1} # normal
+    # {'low': -1.0, 'high': 1.0} # uniform
+    # {'loc': 0, 'scale_matrix': 1, 'rate': 1.0} # laplace
+    # {'df': 3.0, 'scale_matrix': 1} # student_t
+    # {'loc': 0, 'scale': 1} # logistic
+    # {'mu': 0, 'alpha': 1.5, 'beta': 0.0, 'delta': 1.0} # hyperbolic
+    # {} # zeros
+    # {'whiten': false, 'svd_solver': 'auto'} # pca (requires data at runtime)
   
   # Decoder configuration
   decoder:
-    hidden_dims: [64, 32, 16]
+    hidden_dims: [32, 16] 
     output_channels: 1
     output_size: [28, 28]
-    init_size: [4, 4]
+    init_size: [7, 7]
     kernel_size: 3
     stride: 2
     padding: 1
     output_padding: 1
-    bias: true
     normalization: "batch"
     activation: "leaky_relu"
     final_activation: "sigmoid"
     dropout_rate: 0.0
-    upsampling_mode: "transpose"
-    use_spectral_norm: false
-    use_self_attention: false
-    attention_resolution: 32
+    upsampling_mode: "nearest"
   
   # GMM configuration
   gmm:
@@ -91,8 +86,8 @@ model:
     init_weights: "uniform"
     init_covariances: "empirical"
     warm_start: true
-    cem: true
-    weight_concentration_prior: null
+    cem: false
+    weight_concentration_prior: 1.0
     mean_prior: null
     mean_precision_prior: null
     covariance_prior: null
@@ -102,35 +97,46 @@ model:
 
 # Training configuration
 training:
-  epochs: 50
+  epochs: 100
   device: "auto"
   
   # Early stopping
   early_stopping_patience: 10
   
   # GMM training schedule
-  first_epoch_gmm: 0
-  refit_gmm_interval: 50
+  first_epoch_gmm: 25
+  refit_gmm_interval: 25
   lambda_gmm: 1.0
   final_gmm_fit: true
+  
+  # Latent space noise injection (regularization)
+  latent_noise_scale: 0.1  # Add noise to latent codes during training (0.0 = disabled)
   
   # Optimizer configuration (AdamW)
   optimizer:
     decoder:
-      lr: 0.005
+      lr: 0.01
       weight_decay: 0.01
       betas: [0.9, 0.999]
       eps: 1e-8
       amsgrad: false
     representation:
-      lr: 0.05
-      weight_decay: 0.0
+      lr: 0.1
+      weight_decay: 0
       betas: [0.9, 0.999]
       eps: 1e-8
       amsgrad: false
   
-  # Learning rate scheduler
+  # Learning rate scheduler (OneCycleLR)
   lr_scheduler:
     enabled: true
-    warmup_epochs: 10  # Linear warmup for this many epochs
-    eta_min: 1e-6  # Minimum learning rate for cosine annealing
+    max_lr_decoder: 0.01        # Max LR for decoder (if null, uses optimizer lr)
+    max_lr_representation: 0.1  # Max LR for representation (if null, uses optimizer lr)
+    pct_start: 0.25             # Percentage of cycle spent increasing LR
+    div_factor: 10.0            # Initial LR = max_lr / div_factor
+    final_div_factor: 1000.0    # Final LR = max_lr / final_div_factor
+    anneal_strategy: 'cos'      # 'cos' or 'linear'
+    cycle_momentum: true        # If true, momentum is cycled inversely to learning rate
+    base_momentum: 0.85         # Lower momentum bound (used when LR is at max)
+    max_momentum: 0.9           # Upper momentum bound (used when LR is at min)
+    three_phase: false          # If true, use a three phase schedule (increasing, constant, decreasing)
