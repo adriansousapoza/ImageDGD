@@ -6,9 +6,19 @@ import torch
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.patches import Ellipse
+from matplotlib.colors import to_rgba
 from typing import Optional, Tuple
 import warnings
+import math
 warnings.filterwarnings('ignore')
+
+# Import tgmm plotting helpers
+try:
+    from tgmm.plotting import get_covariance_matrix, ensure_tensor_on_cpu, create_colormap
+    TGMM_PLOTTING_AVAILABLE = True
+except ImportError:
+    TGMM_PLOTTING_AVAILABLE = False
+    warnings.warn("tgmm.plotting helpers not available. Using fallback implementation.")
 
 
 def _try_cuml_import():
@@ -243,12 +253,17 @@ def _plot_2d_projection(
 
 
 def _add_gmm_overlay_pca(ax: plt.Axes, gmm, pca, using_cuml: bool):
-    """Add GMM component ellipses to PCA plot."""
+    """Add GMM component ellipses to PCA plot using tgmm helper functions."""
     try:
-        # Get GMM parameters
-        means = gmm.means_.detach().cpu().numpy() if isinstance(gmm.means_, torch.Tensor) else gmm.means_
-        covariances = gmm.covariances_.detach().cpu().numpy() if isinstance(gmm.covariances_, torch.Tensor) else gmm.covariances_
-        weights = gmm.weights_.detach().cpu().numpy() if isinstance(gmm.weights_, torch.Tensor) else gmm.weights_
+        # Get GMM parameters using tgmm helpers if available
+        if TGMM_PLOTTING_AVAILABLE:
+            means = ensure_tensor_on_cpu(gmm.means_, dtype=torch.float32).numpy()
+            weights = ensure_tensor_on_cpu(gmm.weights_, dtype=torch.float32).numpy()
+        else:
+            means = gmm.means_.detach().cpu().numpy() if isinstance(gmm.means_, torch.Tensor) else gmm.means_
+            weights = gmm.weights_.detach().cpu().numpy() if isinstance(gmm.weights_, torch.Tensor) else gmm.weights_
+        
+        n_components = gmm.n_components
         
         # Transform means to PCA space
         if using_cuml:
@@ -273,40 +288,111 @@ def _add_gmm_overlay_pca(ax: plt.Axes, gmm, pca, using_cuml: bool):
         else:
             components = pca.components_
         
+        # Get the actual number of features from GMM
+        n_features = gmm.n_features
+        
+        # Get colors for ellipses using tgmm colormap helper
+        if TGMM_PLOTTING_AVAILABLE:
+            ellipse_colors = create_colormap('turbo', n_components)
+        else:
+            # Fallback: use matplotlib colormap
+            cmap = plt.get_cmap('turbo')
+            if n_components == 1:
+                ellipse_colors = [cmap(0.5)]
+            else:
+                ellipse_colors = [cmap(i / (n_components - 1)) for i in range(n_components)]
+        
+        # Define ellipse parameters (matching tgmm defaults)
+        ellipse_std_devs = [2]
+        ellipse_alpha = 0.5
+        ellipse_fill = True
+        ellipse_line_style = 'dotted'
+        ellipse_line_width = 2
+        ellipse_line_color = 'black'
+        ellipse_line_alpha = 1
+        
         # Plot each component
-        for i, (mean_pca, cov, weight) in enumerate(zip(means_pca, covariances, weights)):
-            # Transform covariance to PCA space
-            if gmm.covariance_type == 'full':
-                cov_pca = components @ cov @ components.T
-            elif gmm.covariance_type == 'diag':
-                cov_pca = components @ np.diag(cov) @ components.T
-            elif gmm.covariance_type == 'spherical':
-                # cov is a scalar for spherical covariance
-                n_features = components.shape[1]
-                cov_pca = components @ (cov * np.eye(n_features)) @ components.T
-            else:  # tied
-                cov_pca = components @ cov @ components.T
+        for i in range(n_components):
+            mean_pca_i = means_pca[i]
+            weight = weights[i]
             
-            # Extract 2D covariance
+            # Get covariance matrix using tgmm helper if available
+            if TGMM_PLOTTING_AVAILABLE:
+                cov = get_covariance_matrix(gmm, i).numpy()
+            else:
+                # Fallback implementation
+                covariances = gmm.covariances_.detach().cpu().numpy() if isinstance(gmm.covariances_, torch.Tensor) else gmm.covariances_
+                
+                # Handle different covariance types
+                if gmm.covariance_type == 'full':
+                    cov = covariances[i]
+                elif gmm.covariance_type == 'diag':
+                    cov = np.diag(covariances[i])
+                elif gmm.covariance_type == 'spherical':
+                    cov = covariances[i] * np.eye(n_features)
+                elif gmm.covariance_type == 'tied_full':
+                    cov = covariances
+                elif gmm.covariance_type == 'tied_diag':
+                    cov = np.diag(covariances)
+                elif gmm.covariance_type == 'tied_spherical':
+                    cov = covariances.item() * np.eye(n_features) if isinstance(covariances, np.ndarray) else covariances * np.eye(n_features)
+                else:
+                    # Unknown type, skip
+                    print(f"Warning: Unknown covariance type {gmm.covariance_type}")
+                    continue
+            
+            # Transform covariance to PCA space
+            cov_pca = components @ cov @ components.T
             cov_2d = cov_pca[:2, :2]
             
-            # Compute eigenvalues and eigenvectors for ellipse
-            eigenvalues, eigenvectors = np.linalg.eigh(cov_2d)
-            angle = np.degrees(np.arctan2(eigenvectors[1, 0], eigenvectors[0, 0]))
+            # Compute eigenvalues and eigenvectors for ellipse (matching tgmm approach)
+            vals, vecs = np.linalg.eigh(cov_2d)
+            idx = np.argsort(vals)[::-1]  # Sort descending
+            vals, vecs = vals[idx], vecs[:, idx]
             
-            # Width and height are 2 standard deviations
-            width, height = 2 * np.sqrt(eigenvalues)
+            angle = np.degrees(np.arctan2(vecs[1, 0], vecs[0, 0]))
             
-            # Create ellipse (2-sigma contour)
-            ellipse = Ellipse(
-                mean_pca[:2], width, height, angle=angle,
-                facecolor='none', edgecolor='red', linewidth=2, alpha=0.7,
-                label=f'GMM {i} (w={weight:.2f})' if i == 0 else f'GMM {i} (w={weight:.2f})'
-            )
-            ax.add_patch(ellipse)
+            # Create ellipses for each standard deviation (matching tgmm)
+            for j, std_dev in enumerate(ellipse_std_devs):
+                width = 2.0 * std_dev * np.sqrt(vals[0])
+                height = 2.0 * std_dev * np.sqrt(vals[1])
+                
+                # Adjust alpha for multiple ellipses (fade inner ellipses)
+                current_alpha = ellipse_alpha * (1 - j * 0.3 / len(ellipse_std_devs))
+                
+                # Create face color with proper alpha
+                if ellipse_fill:
+                    face_color_with_alpha = (*to_rgba(ellipse_colors[i])[:3], current_alpha)
+                else:
+                    face_color_with_alpha = 'none'
+                
+                # Create edge color with proper alpha
+                edge_color_with_alpha = (*to_rgba(ellipse_line_color)[:3], ellipse_line_alpha)
+                
+                ellipse = Ellipse(
+                    (mean_pca_i[0], mean_pca_i[1]),
+                    width, height,
+                    angle=angle,
+                    facecolor=face_color_with_alpha,
+                    edgecolor=edge_color_with_alpha,
+                    linewidth=ellipse_line_width,
+                    linestyle=ellipse_line_style,
+                    label=f'Component {i+1} (w={weight:.2f})' if j == 0 else None
+                )
+                ax.add_patch(ellipse)
             
-            # Add component center
-            ax.scatter(mean_pca[0], mean_pca[1], c='red', s=100, marker='x', linewidths=3, zorder=10)
+            # Add component center (matching tgmm style)
+            ax.scatter(mean_pca_i[0], mean_pca_i[1], 
+                      c='black', marker='h', s=100, 
+                      linewidths=2, zorder=10,
+                      label='Component Mean' if i == 0 else None)
+        
+        # Add legend entry for ellipse boundaries (matching tgmm)
+        sigma_labels = [f"{std}σ" for std in ellipse_std_devs]
+        sigma_text = "[" + ", ".join(sigma_labels) + "]"
+        ax.plot([], [], c=ellipse_line_color, linestyle=ellipse_line_style,
+               linewidth=ellipse_line_width, alpha=ellipse_line_alpha,
+               label=f'{sigma_text}')
         
         # Add legend for GMM components
         ax.legend(loc='upper right', fontsize=8, framealpha=0.9)

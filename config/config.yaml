@@ -77,7 +77,7 @@ model:
   gmm:
     n_components: 20
     n_features: null # If null, uses representation n_features
-    covariance_type: "spherical"
+    covariance_type: "full"
     max_iter: 1000
     tol: 1e-4
     reg_covar: 1e-6
@@ -87,7 +87,7 @@ model:
     init_covariances: "empirical"
     warm_start: true
     cem: false
-    weight_concentration_prior: 1.0
+    weight_concentration_prior: null
     mean_prior: null
     mean_precision_prior: null
     covariance_prior: null
@@ -110,7 +110,9 @@ training:
   final_gmm_fit: true
   
   # Latent space noise injection (regularization)
-  latent_noise_scale: 0.1  # Add noise to latent codes during training (0.0 = disabled)
+  latent_noise_scale: 0.1   # Enable noise injection (0.0 = disabled)
+  latent_noise_start: 1.0  # Starting noise scale (epoch 1)
+  latent_noise_end: 0.01     # Ending noise scale (final epoch)
   
   # Optimizer configuration (AdamW)
   optimizer:
