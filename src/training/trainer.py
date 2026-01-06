@@ -5,6 +5,7 @@ Training utilities and trainer class for ImageDGD.
 import torch
 import torch.nn.functional as F
 import time
+import math
 from datetime import timedelta
 from typing import Dict, List, Tuple, Optional, Any
 from omegaconf import DictConfig
@@ -12,7 +13,7 @@ from tqdm import tqdm
 import numpy as np
 
 # Import tgmm package for Gaussian Mixture Model
-from tgmm import GaussianMixture
+from tgmm import GaussianMixture, ClusteringMetrics
 
 from ..models import RepresentationLayer, DGD, ConvDecoder
 from ..visualization import plot_latent_space, plot_images_by_class
@@ -54,6 +55,12 @@ class DGDTrainer:
         self.learning_rates = []
         self.momentum_betas = []  # Track beta_1 (momentum) values
         
+        # Clustering metrics tracking
+        self.ari_scores = []
+        self.test_ari_scores = []
+        self.silhouette_scores = []
+        self.test_silhouette_scores = []
+        
         # Best loss tracking
         self.best_train_loss = float('inf')
         self.best_test_loss = float('inf')
@@ -67,6 +74,9 @@ class DGDTrainer:
         self.epochs_without_improvement = 0
         self.best_epoch = 0
         self.early_stopping_active = False  # Only activate after first GMM fit
+        
+        # Model checkpointing for best model
+        self.best_model_state = None
     
     def _create_model_components(self, train_loader, test_loader) -> Tuple:
         """Create model components based on configuration."""
@@ -368,12 +378,31 @@ class DGDTrainer:
         for index, _, labels_batch in train_loader:
             train_labels[index] = labels_batch
         
+        # Collect test labels in correct index order
+        n_test_samples = len(test_loader.dataset)
+        test_labels = torch.zeros(n_test_samples, dtype=torch.long)
+        for index, _, labels_batch in test_loader:
+            test_labels[index] = labels_batch
+        
+        # Plot initial train latent space
         plot_latent_space(
             representations=rep.z.detach(),
             labels=train_labels,
             gmm=None,  # No GMM fitted yet
             class_names=class_names,
-            title="Initial Latent Space (Before Training)",
+            title="Initial Train Latent Space (Before Training)",
+            save_path=None,
+            show=True,
+            verbose=self.verbose
+        )
+        
+        # Plot initial test latent space
+        plot_latent_space(
+            representations=test_rep.z.detach(),
+            labels=test_labels,
+            gmm=None,  # No GMM fitted yet
+            class_names=class_names,
+            title="Initial Test Latent Space (Before Training)",
             save_path=None,
             show=True,
             verbose=self.verbose
@@ -426,18 +455,61 @@ class DGDTrainer:
             first_epoch_gmm = self.training_config.first_epoch_gmm
             refit_gmm_interval = self.training_config.refit_gmm_interval
             
+            # Initialize clustering metrics calculator
+            cluster_metrics = ClusteringMetrics()
+            current_train_ari = 0.0
+            current_test_ari = 0.0
+            current_train_silhouette = 0.0
+            current_test_silhouette = 0.0
+            
             if epoch == first_epoch_gmm or (refit_gmm_interval and epoch % refit_gmm_interval == 0):
                 with torch.no_grad():
                     representations = rep.z.detach()
                     gmm.fit(representations, max_iter=1000 if epoch == first_epoch_gmm else 100)
+                    
+                    # Calculate ARI for training data
+                    predicted_labels = gmm.predict(representations)
+                    current_train_ari = cluster_metrics.adjusted_rand_score(train_labels, predicted_labels)
+                    self.ari_scores.append(current_train_ari)
+                    
+                    # Calculate Silhouette Score for training data
+                    current_train_silhouette = cluster_metrics.silhouette_score(representations, predicted_labels, gmm.n_components)
+                    self.silhouette_scores.append(current_train_silhouette)
+                    
+                    # Calculate ARI for test data
+                    test_representations = test_rep.z.detach()
+                    test_predicted_labels = gmm.predict(test_representations)
+                    # Collect test labels in correct index order
+                    n_test_samples = len(test_loader.dataset)
+                    test_labels = torch.zeros(n_test_samples, dtype=torch.long)
+                    for index, _, labels_batch in test_loader:
+                        test_labels[index] = labels_batch
+                    current_test_ari = cluster_metrics.adjusted_rand_score(test_labels, test_predicted_labels)
+                    self.test_ari_scores.append(current_test_ari)
+                    
+                    # Calculate Silhouette Score for test data
+                    current_test_silhouette = cluster_metrics.silhouette_score(test_representations, test_predicted_labels, gmm.n_components)
+                    self.test_silhouette_scores.append(current_test_silhouette)
                 
-                # Plot latent space with GMM overlay
+                # Plot train latent space with GMM overlay
                 plot_latent_space(
                     representations=representations,
                     labels=train_labels,
                     gmm=gmm,
                     class_names=class_names,
-                    title=f"Latent Space - Epoch {epoch} (GMM Fitted)",
+                    title=f"Train Latent Space - Epoch {epoch} (GMM Fitted) - ARI: {current_train_ari:.4f}, Silhouette: {current_train_silhouette:.4f}",
+                    save_path=None,
+                    show=True,
+                    verbose=self.verbose
+                )
+                
+                # Plot test latent space with GMM overlay
+                plot_latent_space(
+                    representations=test_representations,
+                    labels=test_labels,
+                    gmm=gmm,
+                    class_names=class_names,
+                    title=f"Test Latent Space - Epoch {epoch} (GMM Fitted) - ARI: {current_test_ari:.4f}, Silhouette: {current_test_silhouette:.4f}",
                     save_path=None,
                     show=True,
                     verbose=self.verbose
@@ -456,10 +528,44 @@ class DGDTrainer:
                 with torch.no_grad():
                     representations = rep.z.detach()
                     gmm.fit(representations, max_iter=100, warm_start=True)
+                    
+                    # Calculate ARI for training data
+                    predicted_labels = gmm.predict(representations)
+                    current_train_ari = cluster_metrics.adjusted_rand_score(train_labels, predicted_labels)
+                    self.ari_scores.append(current_train_ari)
+                    
+                    # Calculate Silhouette Score for training data
+                    current_train_silhouette = cluster_metrics.silhouette_score(representations, predicted_labels, gmm.n_components)
+                    self.silhouette_scores.append(current_train_silhouette)
+                    
+                    # Calculate ARI for test data
+                    test_representations = test_rep.z.detach()
+                    test_predicted_labels = gmm.predict(test_representations)
+                    # Collect test labels in correct index order
+                    n_test_samples = len(test_loader.dataset)
+                    test_labels = torch.zeros(n_test_samples, dtype=torch.long)
+                    for index, _, labels_batch in test_loader:
+                        test_labels[index] = labels_batch
+                    current_test_ari = cluster_metrics.adjusted_rand_score(test_labels, test_predicted_labels)
+                    self.test_ari_scores.append(current_test_ari)
+                    
+                    # Calculate Silhouette Score for test data
+                    current_test_silhouette = cluster_metrics.silhouette_score(test_representations, test_predicted_labels, gmm.n_components)
+                    self.test_silhouette_scores.append(current_test_silhouette)
             
             # Training phase
             model.decoder.train()
             trainrep_optimizer.zero_grad()
+            
+            # Calculate scheduled noise scale (cosine annealing from start to end)
+            if self.training_config.latent_noise_scale > 0:
+                noise_start = self.training_config.get('latent_noise_start', 1.0)
+                noise_end = self.training_config.get('latent_noise_end', 0.01)
+                progress = (epoch - 1) / max(self.training_config.epochs - 1, 1)
+                # Cosine annealing: starts at noise_start, smoothly decreases to noise_end
+                noise_scale = noise_end + (noise_start - noise_end) * 0.5 * (1 + math.cos(math.pi * progress))
+            else:
+                noise_scale = 0.0
             
             for i, (index, x, labels_batch) in enumerate(train_loader):
                 decoder_optimizer.zero_grad()
@@ -470,8 +576,8 @@ class DGDTrainer:
                 z = rep(index)
 
                 # Latent Space Noise Injection (regularization during training)
-                if model.decoder.training and self.training_config.latent_noise_scale > 0:
-                    noise = torch.randn_like(z) * self.training_config.latent_noise_scale
+                if model.decoder.training and noise_scale > 0:
+                    noise = torch.randn_like(z) * noise_scale
                     z = z + noise
 
                 y = model.decoder(z)
@@ -575,6 +681,12 @@ class DGDTrainer:
             if test_loss < self.best_test_loss:
                 self.best_test_loss = test_loss
                 self.best_epoch = epoch
+                # Save best model checkpoint (decoder and representations only)
+                self.best_model_state = {
+                    'decoder': model.decoder.state_dict(),
+                    'rep': rep.state_dict(),
+                    'test_rep': test_rep.state_dict()
+                }
                 # Reset early stopping counter when test loss improves
                 if self.early_stopping_active:
                     self.epochs_without_improvement = 0
@@ -609,10 +721,12 @@ class DGDTrainer:
             # Format GMM losses for display
             gmm_train_str = f"{gmm_train_loss:.4f} (B: {self.best_gmm_train:.4f})" if epoch >= first_epoch_gmm else "0.0000"
             gmm_test_str = f"{gmm_test_loss:.4f} (B: {self.best_gmm_test:.4f})" if epoch >= first_epoch_gmm else "0.0000"
+            train_ari_str = f", ARI={current_train_ari:.4f}, Sil={current_train_silhouette:.4f}" if epoch >= first_epoch_gmm else ""
+            test_ari_str = f", ARI={current_test_ari:.4f}, Sil={current_test_silhouette:.4f}" if epoch >= first_epoch_gmm else ""
             
-            print(f"Epoch {epoch}/{self.training_config.epochs} [Time per Epoch: {epoch_time_str}, Remaining Time: {remaining_time_str}, LR: Dec={lr_decoder:.2e}, Rep={lr_rep:.2e}]")
-            print(f"       - Train Loss: {train_loss:.4f} (B: {self.best_train_loss:.4f}), Recon: {recon_train_loss:.4f} (B: {self.best_recon_train:.4f}), GMM: {gmm_train_str}")
-            print(f"       - Test  Loss: {test_loss:.4f} (B: {self.best_test_loss:.4f}), Recon: {recon_test_loss:.4f} (B: {self.best_recon_test:.4f}), GMM: {gmm_test_str}")
+            print(f"Epoch {epoch}/{self.training_config.epochs} [Time per Epoch: {epoch_time_str}, Remaining Time: {remaining_time_str}, LR: Dec={lr_decoder:.2e}, Rep={lr_rep:.2e}, Noise={noise_scale:.4f}]")
+            print(f"       - Train Loss: {train_loss:.4f} (B: {self.best_train_loss:.4f}), Recon: {recon_train_loss:.4f} (B: {self.best_recon_train:.4f}), GMM: {gmm_train_str}{train_ari_str}")
+            print(f"       - Test  Loss: {test_loss:.4f} (B: {self.best_test_loss:.4f}), Recon: {recon_test_loss:.4f} (B: {self.best_recon_test:.4f}), GMM: {gmm_test_str}{test_ari_str}")
 
             # Check for early stopping (only if active)
             early_stopping_patience = getattr(self.training_config, 'early_stopping_patience', None)
@@ -622,6 +736,22 @@ class DGDTrainer:
                     print(f"   No improvement in test loss for {early_stopping_patience} consecutive epochs (since GMM activation)")
                     print(f"   Best test loss: {self.best_test_loss:.4f} at epoch {self.best_epoch}")
                 break
+        
+        # Restore best model checkpoint
+        if self.best_model_state is not None:
+            if self.verbose:
+                print(f"\nRestoring best model from epoch {self.best_epoch} (test loss: {self.best_test_loss:.4f})")
+            model.decoder.load_state_dict(self.best_model_state['decoder'])
+            rep.load_state_dict(self.best_model_state['rep'])
+            test_rep.load_state_dict(self.best_model_state['test_rep'])
+            # Refit GMM to the best representations
+            if self.verbose:
+                print(f"   Refitting GMM to best representations...")
+            with torch.no_grad():
+                representations = rep.z.detach()
+                gmm.fit(representations, max_iter=self.config.model.gmm.max_iter)
+            if self.verbose:
+                print(f"   GMM converged: {gmm.converged_} (iterations: {gmm.n_iter_})")
         
         # Final GMM fit after training completes (for best generative model)
         final_gmm_fit = getattr(self.training_config, 'final_gmm_fit', False)
@@ -633,6 +763,55 @@ class DGDTrainer:
                 gmm.fit(representations, max_iter=self.config.model.gmm.max_iter)
             if self.verbose:
                 print(f"   Final GMM converged: {gmm.converged_} (iterations: {gmm.n_iter_})")
+        
+        # Plot final train latent space with best model
+        with torch.no_grad():
+            representations = rep.z.detach()
+            test_representations = test_rep.z.detach()
+            
+            # Calculate final metrics if GMM is fitted
+            if epoch >= first_epoch_gmm:
+                # Train metrics
+                predicted_labels = gmm.predict(representations)
+                final_train_ari = cluster_metrics.adjusted_rand_score(train_labels, predicted_labels)
+                final_train_silhouette = cluster_metrics.silhouette_score(representations, predicted_labels, gmm.n_components)
+                final_train_title = f"Final Train Latent Space (Best Model - Epoch {self.best_epoch}) - ARI: {final_train_ari:.4f}, Sil: {final_train_silhouette:.4f}"
+                
+                # Test metrics
+                test_predicted_labels = gmm.predict(test_representations)
+                final_test_ari = cluster_metrics.adjusted_rand_score(test_labels, test_predicted_labels)
+                final_test_silhouette = cluster_metrics.silhouette_score(test_representations, test_predicted_labels, gmm.n_components)
+                final_test_title = f"Final Test Latent Space (Best Model - Epoch {self.best_epoch}) - ARI: {final_test_ari:.4f}, Sil: {final_test_silhouette:.4f}"
+            else:
+                final_train_title = "Final Train Latent Space (After Training)"
+                final_test_title = "Final Test Latent Space (After Training)"
+            
+            # Plot train latent space
+            plot_latent_space(
+                representations=representations,
+                labels=train_labels,
+                gmm=gmm if epoch >= first_epoch_gmm else None,
+                class_names=class_names,
+                title=final_train_title,
+                save_path=None,
+                show=True,
+                verbose=self.verbose
+            )
+            
+            # Plot test latent space
+            plot_latent_space(
+                representations=test_representations,
+                labels=test_labels,
+                gmm=gmm if epoch >= first_epoch_gmm else None,
+                class_names=class_names,
+                title=final_test_title,
+                save_path=None,
+                show=True,
+                verbose=self.verbose
+            )
+        
+        # Plot final reconstructions
+        self._plot_reconstructions(model, rep, test_rep, epoch=epoch)
         
         # Training complete
         total_time = time.time() - start_time
