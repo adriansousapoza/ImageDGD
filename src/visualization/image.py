@@ -107,7 +107,9 @@ def plot_generated_samples(images: torch.Tensor,
                           n_cols: int = 8,
                           cmap: str = 'gray',
                           denormalize: bool = True,
-                          figsize: Optional[Tuple[int, int]] = None) -> plt.Figure:
+                          figsize: Optional[Tuple[int, int]] = None,
+                          save_path: Optional[str] = None,
+                          show: bool = True) -> plt.Figure:
     """
     Plot generated images in a grid layout.
     
@@ -166,6 +168,15 @@ def plot_generated_samples(images: torch.Tensor,
             axes_flat[i].axis('off')
     
     plt.tight_layout()
+
+    if save_path:
+        fig.savefig(save_path, dpi=150, bbox_inches='tight')
+
+    if show:
+        plt.show()
+    else:
+        plt.close(fig)
+
     return fig
 
 
@@ -318,11 +329,13 @@ def plot_images_by_class(images: torch.Tensor,
                         n_per_class: int = 5,
                         cmap: str = 'viridis',
                         denormalize: bool = True,
-                        figsize: Optional[Tuple[int, int]] = None) -> plt.Figure:
+                        figsize: Optional[Tuple[int, int]] = None,
+                        save_path: Optional[str] = None,
+                        show: bool = True) -> plt.Figure:
     """
     Universal function to plot images organized by class in a grid.
     Works for any set of images: originals, reconstructions, generations, etc.
-    
+
     Parameters:
     ----------
     images: Tensor of images with shape (N, C, H, W)
@@ -333,16 +346,18 @@ def plot_images_by_class(images: torch.Tensor,
     cmap: Colormap to use
     denormalize: Whether to denormalize images from [-1,1] to [0,1]
     figsize: Figure size (width, height). If None, auto-calculated
-    
+    save_path: Optional path to save the figure
+    show: Whether to display the figure
+
     Returns:
     -------
     Matplotlib figure object
     """
     n_classes = len(class_names)
-    
+
     # Organize images by class
     images_by_class = organize_by_class(images, labels, n_classes, n_per_class)
-    
+
     # Plot using the grid function
     fig = plot_image_grid(
         images_by_class,
@@ -353,5 +368,13 @@ def plot_images_by_class(images: torch.Tensor,
         denormalize=denormalize,
         figsize=figsize
     )
-    
+
+    if save_path:
+        fig.savefig(save_path, dpi=150, bbox_inches='tight')
+
+    if show:
+        plt.show()
+    else:
+        plt.close(fig)
+
     return fig
