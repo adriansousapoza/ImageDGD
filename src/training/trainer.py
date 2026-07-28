@@ -7,8 +7,9 @@ import torch.nn.functional as F
 import time
 import math
 from datetime import timedelta
+from pathlib import Path
 from typing import Dict, List, Tuple, Optional, Any
-from omegaconf import DictConfig
+from omegaconf import DictConfig, OmegaConf
 from tqdm import tqdm
 import numpy as np
 
@@ -16,19 +17,19 @@ import numpy as np
 from tgmm import GaussianMixture, ClusteringMetrics
 
 from ..models import RepresentationLayer, DGD, ConvDecoder
-from ..visualization import plot_latent_space, plot_images_by_class
-import matplotlib.pyplot as plt
+from ..data.dataloader import collect_all_labels
+from ..utils.checkpoint import save_checkpoint
 
 
 class DGDTrainer:
     """
     Trainer class for DGD model with ClearML integration.
     """
-    
+
     def __init__(self, config: DictConfig, device: torch.device, verbose: bool = True):
         """
         Initialize the trainer.
-        
+
         Parameters:
         ----------
         config: Training configuration
@@ -39,59 +40,59 @@ class DGDTrainer:
         self.device = device
         self.training_config = config.training
         self.verbose = verbose
-        
+
         # Initialize tracking lists
         self.train_losses = []
-        self.test_losses = []
+        self.val_losses = []
         self.gmm_train_losses = []
-        self.gmm_test_losses = []
+        self.gmm_val_losses = []
         self.recon_train_losses = []
-        self.recon_test_losses = []
-        
+        self.recon_val_losses = []
+
         # Timing
         self.epoch_times = []
-        
+
         # Learning rate tracking
         self.learning_rates = []
         self.momentum_betas = []  # Track beta_1 (momentum) values
-        
+
         # Clustering metrics tracking
         self.ari_scores = []
-        self.test_ari_scores = []
+        self.val_ari_scores = []
         self.silhouette_scores = []
-        self.test_silhouette_scores = []
-        
+        self.val_silhouette_scores = []
+
         # Best loss tracking
         self.best_train_loss = float('inf')
-        self.best_test_loss = float('inf')
+        self.best_val_loss = float('inf')
         self.best_recon_train = float('inf')
-        self.best_recon_test = float('inf')
+        self.best_recon_val = float('inf')
         self.best_gmm_train = float('inf')
-        self.best_gmm_test = float('inf')
-        
+        self.best_gmm_val = float('inf')
+
         # Early stopping (based on training loss)
         # Note: Early stopping only starts after GMM is fitted to avoid false triggers
         self.epochs_without_improvement = 0
         self.best_epoch = 0
         self.early_stopping_active = False  # Only activate after first GMM fit
-        
+
         # Model checkpointing for best model
         self.best_model_state = None
-    
-    def _create_model_components(self, train_loader, test_loader) -> Tuple:
+
+    def _create_model_components(self, train_loader, val_loader) -> Tuple:
         """Create model components based on configuration."""
         model_config = self.config.model
-        
+
         # Get dataset sizes
         nsample_train = len(train_loader.dataset)
-        nsample_test = len(test_loader.dataset)
-        
+        nsample_val = len(val_loader.dataset)
+
         # Create representation layers
         distribution = model_config.representation.distribution
-        
+
         # Prepare distribution parameters based on the distribution type
         dist_params = {}
-        
+
         # Special handling for PCA initialization
         if distribution == 'pca':
             # Collect all training data
@@ -103,15 +104,15 @@ class DGDTrainer:
                     images = batch
                 train_data.append(images)
             train_data = torch.cat(train_data, dim=0).to(self.device)
-            
+
             # Flatten images for PCA
             n_samples = train_data.shape[0]
             train_data_flat = train_data.reshape(n_samples, -1)
-            
+
             # Ensure float dtype for PCA
             if train_data_flat.dtype in [torch.long, torch.int, torch.int32, torch.int64]:
                 train_data_flat = train_data_flat.float()
-            
+
             # Add PCA-specific parameters
             dist_params['data'] = train_data_flat
             # Get PCA params from config if present, otherwise use defaults
@@ -122,13 +123,13 @@ class DGDTrainer:
             # Handle standard distribution parameters
             if hasattr(model_config.representation, 'radius'):
                 dist_params['radius'] = model_config.representation.radius
-            
+
             # Handle other potential distribution parameters
-            for param in ['mean', 'cov', 'low', 'high', 'loc', 'scale', 'scale_matrix', 
+            for param in ['mean', 'cov', 'low', 'high', 'loc', 'scale', 'scale_matrix',
                          'rate', 'df', 'mu', 'alpha', 'beta', 'delta']:
                 if hasattr(model_config.representation, param):
                     dist_params[param] = getattr(model_config.representation, param)
-        
+
         rep = RepresentationLayer(
             dim=model_config.representation.n_features,
             n_samples=nsample_train,
@@ -136,36 +137,36 @@ class DGDTrainer:
             dist_params=dist_params,
             device=self.device
         )
-        
+
         if distribution == 'pca' and self.verbose:
             explained_var = rep._options.get('explained_variance_ratio', None)
             if explained_var:
                 total_var = sum(explained_var) * 100
                 print(f"   PCA explained variance: {total_var:.2f}% (top {len(explained_var)} components)")
                 print(f"   Per component: {[f'{v*100:.2f}%' for v in explained_var[:5]]}")
-        
-        # Create test representation layer
-        # For PCA initialization, we use normal distribution for test set
+
+        # Create val representation layer
+        # For PCA initialization, we use normal distribution for val set
         # since we can't apply the same PCA transform (different sample size)
         if distribution == 'pca':
             if self.verbose:
-                print("   Initializing test representations with normal distribution...")
-            test_rep = RepresentationLayer(
+                print("   Initializing val representations with normal distribution...")
+            val_rep = RepresentationLayer(
                 dim=model_config.representation.n_features,
-                n_samples=nsample_test,
-                dist='normal',  # Use normal for test set
+                n_samples=nsample_val,
+                dist='normal',  # Use normal for val set
                 dist_params={},
                 device=self.device
             )
         else:
-            test_rep = RepresentationLayer(
+            val_rep = RepresentationLayer(
                 dim=model_config.representation.n_features,
-                n_samples=nsample_test,
+                n_samples=nsample_val,
                 dist=distribution,
                 dist_params=dist_params,
                 device=self.device
             )
-        
+
         # Create decoder
         decoder = ConvDecoder(
             latent_dim=model_config.representation.n_features,
@@ -177,7 +178,7 @@ class DGDTrainer:
             dropout_rate=model_config.decoder.dropout_rate,
             init_size=model_config.decoder.init_size
         ).to(self.device)
-        
+
         # Create GMM
         gmm = GaussianMixture(
             n_components=model_config.gmm.n_components,
@@ -202,16 +203,16 @@ class DGDTrainer:
             verbose_interval=model_config.gmm.verbose_interval,
             device=self.device,
         )
-        
+
         # Create full model
         model = DGD(decoder, rep, gmm)
-        
-        return model, rep, test_rep, gmm
-    
-    def _create_optimizers(self, model, rep, test_rep) -> List:
+
+        return model, rep, val_rep, gmm
+
+    def _create_optimizers(self, model, rep, val_rep) -> List:
         """Create AdamW optimizers based on configuration."""
         training_config = self.training_config
-        
+
         # Decoder optimizer (AdamW)
         decoder_config = training_config.optimizer.decoder
         decoder_optimizer = torch.optim.AdamW(
@@ -222,7 +223,7 @@ class DGDTrainer:
             weight_decay=decoder_config.weight_decay,
             amsgrad=decoder_config.get('amsgrad', False)
         )
-        
+
         # Representation optimizers (AdamW)
         rep_config = training_config.optimizer.representation
         trainrep_optimizer = torch.optim.AdamW(
@@ -233,71 +234,29 @@ class DGDTrainer:
             weight_decay=rep_config.weight_decay,
             amsgrad=rep_config.get('amsgrad', False)
         )
-        
-        testrep_optimizer = torch.optim.AdamW(
-            test_rep.parameters(),
+
+        valrep_optimizer = torch.optim.AdamW(
+            val_rep.parameters(),
             lr=rep_config.lr,
             betas=tuple(rep_config.betas),
             eps=rep_config.eps,
             weight_decay=rep_config.weight_decay,
             amsgrad=rep_config.get('amsgrad', False)
         )
-        
-        return [decoder_optimizer, trainrep_optimizer, testrep_optimizer]
-    
-    def _plot_reconstructions(self, model, rep, test_rep, epoch: int) -> None:
-        """Generate and plot reconstructions for sample data."""
-        model.decoder.eval()
-        with torch.no_grad():
-            # Unpack sample data
-            indices_train, images_train, labels_train, indices_test, images_test, labels_test = self.sample_data
-            
-            # Move to device
-            indices_train = indices_train.to(self.device)
-            images_train = images_train.to(self.device)
-            indices_test = indices_test.to(self.device)
-            images_test = images_test.to(self.device)
-            
-            # Generate reconstructions
-            z_train = rep(indices_train)
-            recon_train = model.decoder(z_train)
-            
-            z_test = test_rep(indices_test)
-            recon_test = model.decoder(z_test)
-            
-            # Plot train reconstructions
-            plot_images_by_class(
-                images=recon_train,
-                labels=labels_train,
-                class_names=self.class_names,
-                title=f'Train: Reconstructed Images by Class - Epoch {epoch}',
-                n_per_class=5,
-                cmap='viridis'
-            )
-            plt.show()
-            
-            # Plot test reconstructions
-            plot_images_by_class(
-                images=recon_test,
-                labels=labels_test,
-                class_names=self.class_names,
-                title=f'Test: Reconstructed Images by Class - Epoch {epoch}',
-                n_per_class=5,
-                cmap='viridis'
-            )
-            plt.show()
-    
+
+        return [decoder_optimizer, trainrep_optimizer, valrep_optimizer]
+
     def _create_schedulers(self, optimizers, total_epochs: int, steps_per_epoch: int) -> List:
         """Create learning rate schedulers using OneCycleLR.
-        
+
         Note: Decoder steps per batch, representations step per epoch.
         Need different total_steps for each optimizer.
         """
         lr_config = self.training_config.lr_scheduler
-        
+
         if not lr_config.get('enabled', False):
             return [None, None, None]
-        
+
         # OneCycleLR parameters
         pct_start = lr_config.get('pct_start', 0.3)
         div_factor = lr_config.get('div_factor', 25.0)
@@ -307,7 +266,7 @@ class DGDTrainer:
         base_momentum = lr_config.get('base_momentum', 0.85)
         max_momentum = lr_config.get('max_momentum', 0.95)
         three_phase = lr_config.get('three_phase', False)
-        
+
         schedulers = []
         for i, optimizer in enumerate(optimizers):
             # Get max learning rate from scheduler config or optimizer
@@ -315,17 +274,17 @@ class DGDTrainer:
                 max_lr = lr_config.get('max_lr_decoder', None)
                 if max_lr is None:
                     max_lr = optimizer.param_groups[0]['lr']
-            else:  # Representation optimizers (trainrep and testrep)
+            else:  # Representation optimizers (trainrep and valrep)
                 max_lr = lr_config.get('max_lr_representation', None)
                 if max_lr is None:
                     max_lr = optimizer.param_groups[0]['lr']
-            
+
             # Decoder (index 0) steps per batch, representations (indices 1, 2) step per epoch
             if i == 0:  # Decoder optimizer
                 total_steps = total_epochs * steps_per_epoch
-            else:  # Representation optimizers (trainrep and testrep)
+            else:  # Representation optimizers (trainrep and valrep)
                 total_steps = total_epochs
-            
+
             # Create OneCycleLR scheduler
             scheduler = torch.optim.lr_scheduler.OneCycleLR(
                 optimizer,
@@ -340,223 +299,195 @@ class DGDTrainer:
                 max_momentum=max_momentum,
                 three_phase=three_phase
             )
-            
+
             schedulers.append(scheduler)
-        
+
         return schedulers
-    
-    def train(self, train_loader, test_loader, sample_data, class_names) -> Dict[str, Any]:
+
+    def _safe_silhouette_score(
+        self,
+        cluster_metrics: ClusteringMetrics,
+        representations: torch.Tensor,
+        labels: torch.Tensor,
+        n_components: int
+    ) -> float:
+        """Compute silhouette score, subsampling large sets to bound GPU memory use.
+
+        ClusteringMetrics.silhouette_score materializes a full (N, N) pairwise
+        distance matrix, which OOMs once N reaches the tens of thousands. Subsampling
+        keeps memory bounded while still giving a representative score, mirroring
+        sklearn's silhouette_score `sample_size` parameter.
+        """
+        max_samples = getattr(self.training_config, 'silhouette_max_samples', 5000)
+        n_samples = representations.size(0)
+        if n_samples > max_samples:
+            idx = torch.randperm(n_samples, device=representations.device)[:max_samples]
+            representations = representations[idx]
+            labels = labels[idx]
+        return cluster_metrics.silhouette_score(representations, labels, n_components)
+
+    def train(self, train_loader, val_loader, sample_data, class_names) -> Dict[str, Any]:
         """
         Main training loop.
-        
+
         Parameters:
         ----------
         train_loader: Training data loader
-        test_loader: Test data loader
+        val_loader: Validation data loader
         sample_data: Sample data for visualization
         class_names: List of class names
-        
+
         Returns:
         -------
         Dictionary containing training results
         """
-        # Store datasets for visualization
+        # Store datasets for later use
         self.train_dataset = train_loader.dataset
-        self.test_dataset = test_loader.dataset
+        self.val_dataset = val_loader.dataset
         self.sample_data = sample_data
         self.class_names = class_names
-        
+
+        experiment_dir = Path(self.config.paths.models_dir) / self.config.experiment_name
+        checkpoint_root = experiment_dir / "checkpoints"
+
         # Create model components
-        model, rep, test_rep, gmm = self._create_model_components(train_loader, test_loader)
-        
-        # Collect training labels in correct index order for visualization
-        # We need labels aligned with representation indices (0 to n_samples-1)
-        n_train_samples = len(train_loader.dataset)
-        train_labels = torch.zeros(n_train_samples, dtype=torch.long)
-        
-        # Collect labels indexed correctly (not in batch order!)
-        for index, _, labels_batch in train_loader:
-            train_labels[index] = labels_batch
-        
-        # Collect test labels in correct index order
-        n_test_samples = len(test_loader.dataset)
-        test_labels = torch.zeros(n_test_samples, dtype=torch.long)
-        for index, _, labels_batch in test_loader:
-            test_labels[index] = labels_batch
-        
-        # Plot initial train latent space
-        plot_latent_space(
-            representations=rep.z.detach(),
-            labels=train_labels,
-            gmm=None,  # No GMM fitted yet
-            class_names=class_names,
-            title="Initial Train Latent Space (Before Training)",
-            save_path=None,
-            show=True,
-            verbose=self.verbose
+        model, rep, val_rep, gmm = self._create_model_components(train_loader, val_loader)
+
+        # Collect training and val labels, indexed to match representation rows
+        train_labels = collect_all_labels(train_loader)
+        val_labels = collect_all_labels(val_loader)
+
+        # Persist the initial (pre-training) state as the epoch-0 checkpoint
+        save_checkpoint(
+            checkpoint_root / "epoch_0000",
+            model.decoder, rep, val_rep, gmm,
+            metadata={'epoch': 0}
         )
-        
-        # Plot initial test latent space
-        plot_latent_space(
-            representations=test_rep.z.detach(),
-            labels=test_labels,
-            gmm=None,  # No GMM fitted yet
-            class_names=class_names,
-            title="Initial Test Latent Space (Before Training)",
-            save_path=None,
-            show=True,
-            verbose=self.verbose
-        )
-        
-        # Plot initial reconstructions
-        self._plot_reconstructions(model, rep, test_rep, epoch=0)
-        
+
         # Create optimizers
-        optimizers = self._create_optimizers(model, rep, test_rep)
-        decoder_optimizer, trainrep_optimizer, testrep_optimizer = optimizers
-        
+        optimizers = self._create_optimizers(model, rep, val_rep)
+        decoder_optimizer, trainrep_optimizer, valrep_optimizer = optimizers
+
         # Create learning rate schedulers
         steps_per_epoch = len(train_loader)
         schedulers = self._create_schedulers(optimizers, self.training_config.epochs, steps_per_epoch)
-        decoder_scheduler, trainrep_scheduler, testrep_scheduler = schedulers
-        
+        decoder_scheduler, trainrep_scheduler, valrep_scheduler = schedulers
+
         # Log model parameters
         decoder_params = sum(p.numel() for p in model.decoder.parameters() if p.requires_grad)
         rep_params = sum(p.numel() for p in rep.parameters() if p.requires_grad)
-        test_rep_params = sum(p.numel() for p in test_rep.parameters() if p.requires_grad)
-        
+        val_rep_params = sum(p.numel() for p in val_rep.parameters() if p.requires_grad)
+
         if self.verbose:
             print(f"Decoder parameters: {decoder_params:,} ({decoder_params / 1e6:.2f}M)")
             print(f"Train representation parameters: {rep_params:,} ({rep_params / 1e6:.2f}M)")
-            print(f"Test representation parameters: {test_rep_params:,} ({test_rep_params / 1e6:.2f}M)")
-            print(f"Total trainable parameters: {decoder_params + rep_params + test_rep_params:,} "
-                  f"({(decoder_params + rep_params + test_rep_params) / 1e6:.2f}M)")
-            
+            print(f"Val representation parameters: {val_rep_params:,} ({val_rep_params / 1e6:.2f}M)")
+            print(f"Total trainable parameters: {decoder_params + rep_params + val_rep_params:,} "
+                  f"({(decoder_params + rep_params + val_rep_params) / 1e6:.2f}M)")
+
             # Print training configuration info
             print(f"Training for {self.training_config.epochs} epochs")
             print(f"Using device: {self.device}")
             print(f"Batch size: {self.config.data.batch_size}")
-        
+
         # Training loop
         start_time = time.time()
 
         for epoch in range(1, self.training_config.epochs + 1):
             epoch_start_time = time.time()
-            
+
             # Initialize loss tracking
             train_loss = 0.0
-            test_loss = 0.0
+            val_loss = 0.0
             gmm_train_loss = 0.0
-            gmm_test_loss = 0.0
+            gmm_val_loss = 0.0
             recon_train_loss = 0.0
-            recon_test_loss = 0.0
-            
+            recon_val_loss = 0.0
+
             # Initialize or refit GMM
             first_epoch_gmm = self.training_config.first_epoch_gmm
             refit_gmm_interval = self.training_config.refit_gmm_interval
-            
+
             # Initialize clustering metrics calculator
             cluster_metrics = ClusteringMetrics()
             current_train_ari = 0.0
-            current_test_ari = 0.0
+            current_val_ari = 0.0
             current_train_silhouette = 0.0
-            current_test_silhouette = 0.0
-            
-            if epoch == first_epoch_gmm or (refit_gmm_interval and epoch % refit_gmm_interval == 0):
+            current_val_silhouette = 0.0
+
+            is_gmm_refit_epoch = epoch == first_epoch_gmm or (refit_gmm_interval and epoch % refit_gmm_interval == 0)
+
+            if is_gmm_refit_epoch:
                 with torch.no_grad():
                     representations = rep.z.detach()
                     gmm.fit(representations, max_iter=1000 if epoch == first_epoch_gmm else 100)
-                    
+
                     # Calculate ARI for training data
                     predicted_labels = gmm.predict(representations)
                     current_train_ari = cluster_metrics.adjusted_rand_score(train_labels, predicted_labels)
                     self.ari_scores.append(current_train_ari)
-                    
+
                     # Calculate Silhouette Score for training data
-                    current_train_silhouette = cluster_metrics.silhouette_score(representations, predicted_labels, gmm.n_components)
+                    current_train_silhouette = self._safe_silhouette_score(cluster_metrics, representations, predicted_labels, gmm.n_components)
                     self.silhouette_scores.append(current_train_silhouette)
-                    
-                    # Calculate ARI for test data
-                    test_representations = test_rep.z.detach()
-                    test_predicted_labels = gmm.predict(test_representations)
-                    # Collect test labels in correct index order
-                    n_test_samples = len(test_loader.dataset)
-                    test_labels = torch.zeros(n_test_samples, dtype=torch.long)
-                    for index, _, labels_batch in test_loader:
-                        test_labels[index] = labels_batch
-                    current_test_ari = cluster_metrics.adjusted_rand_score(test_labels, test_predicted_labels)
-                    self.test_ari_scores.append(current_test_ari)
-                    
-                    # Calculate Silhouette Score for test data
-                    current_test_silhouette = cluster_metrics.silhouette_score(test_representations, test_predicted_labels, gmm.n_components)
-                    self.test_silhouette_scores.append(current_test_silhouette)
-                
-                # Plot train latent space with GMM overlay
-                plot_latent_space(
-                    representations=representations,
-                    labels=train_labels,
-                    gmm=gmm,
-                    class_names=class_names,
-                    title=f"Train Latent Space - Epoch {epoch} (GMM Fitted) - ARI: {current_train_ari:.4f}, Silhouette: {current_train_silhouette:.4f}",
-                    save_path=None,
-                    show=True,
-                    verbose=self.verbose
+
+                    # Calculate ARI for val data
+                    val_representations = val_rep.z.detach()
+                    val_predicted_labels = gmm.predict(val_representations)
+                    current_val_ari = cluster_metrics.adjusted_rand_score(val_labels, val_predicted_labels)
+                    self.val_ari_scores.append(current_val_ari)
+
+                    # Calculate Silhouette Score for val data
+                    current_val_silhouette = self._safe_silhouette_score(cluster_metrics, val_representations, val_predicted_labels, gmm.n_components)
+                    self.val_silhouette_scores.append(current_val_silhouette)
+
+                # Persist a checkpoint at every GMM-refit epoch
+                save_checkpoint(
+                    checkpoint_root / f"epoch_{epoch:04d}",
+                    model.decoder, rep, val_rep, gmm,
+                    metadata={
+                        'epoch': epoch,
+                        'train_ari': current_train_ari,
+                        'val_ari': current_val_ari,
+                        'train_silhouette': current_train_silhouette,
+                        'val_silhouette': current_val_silhouette,
+                    }
                 )
-                
-                # Plot test latent space with GMM overlay
-                plot_latent_space(
-                    representations=test_representations,
-                    labels=test_labels,
-                    gmm=gmm,
-                    class_names=class_names,
-                    title=f"Test Latent Space - Epoch {epoch} (GMM Fitted) - ARI: {current_test_ari:.4f}, Silhouette: {current_test_silhouette:.4f}",
-                    save_path=None,
-                    show=True,
-                    verbose=self.verbose
-                )
-                
-                # Plot reconstructions after GMM fit
-                self._plot_reconstructions(model, rep, test_rep, epoch=epoch)
-                
+
                 # Activate early stopping after first GMM fit
                 if epoch == first_epoch_gmm:
                     self.early_stopping_active = True
                     self.best_train_loss = float('inf')  # Reset best loss
-                    self.best_test_loss = float('inf')  # Reset test loss too (GMM adds error term)
+                    self.best_val_loss = float('inf')  # Reset val loss too (GMM adds error term)
                     self.epochs_without_improvement = 0
             elif epoch > first_epoch_gmm:
                 with torch.no_grad():
                     representations = rep.z.detach()
                     gmm.fit(representations, max_iter=100, warm_start=True)
-                    
+
                     # Calculate ARI for training data
                     predicted_labels = gmm.predict(representations)
                     current_train_ari = cluster_metrics.adjusted_rand_score(train_labels, predicted_labels)
                     self.ari_scores.append(current_train_ari)
-                    
+
                     # Calculate Silhouette Score for training data
-                    current_train_silhouette = cluster_metrics.silhouette_score(representations, predicted_labels, gmm.n_components)
+                    current_train_silhouette = self._safe_silhouette_score(cluster_metrics, representations, predicted_labels, gmm.n_components)
                     self.silhouette_scores.append(current_train_silhouette)
-                    
-                    # Calculate ARI for test data
-                    test_representations = test_rep.z.detach()
-                    test_predicted_labels = gmm.predict(test_representations)
-                    # Collect test labels in correct index order
-                    n_test_samples = len(test_loader.dataset)
-                    test_labels = torch.zeros(n_test_samples, dtype=torch.long)
-                    for index, _, labels_batch in test_loader:
-                        test_labels[index] = labels_batch
-                    current_test_ari = cluster_metrics.adjusted_rand_score(test_labels, test_predicted_labels)
-                    self.test_ari_scores.append(current_test_ari)
-                    
-                    # Calculate Silhouette Score for test data
-                    current_test_silhouette = cluster_metrics.silhouette_score(test_representations, test_predicted_labels, gmm.n_components)
-                    self.test_silhouette_scores.append(current_test_silhouette)
-            
+
+                    # Calculate ARI for val data
+                    val_representations = val_rep.z.detach()
+                    val_predicted_labels = gmm.predict(val_representations)
+                    current_val_ari = cluster_metrics.adjusted_rand_score(val_labels, val_predicted_labels)
+                    self.val_ari_scores.append(current_val_ari)
+
+                    # Calculate Silhouette Score for val data
+                    current_val_silhouette = self._safe_silhouette_score(cluster_metrics, val_representations, val_predicted_labels, gmm.n_components)
+                    self.val_silhouette_scores.append(current_val_silhouette)
+
             # Training phase
             model.decoder.train()
             trainrep_optimizer.zero_grad()
-            
+
             # Calculate scheduled noise scale (cosine annealing from start to end)
             if self.training_config.latent_noise_scale > 0:
                 noise_start = self.training_config.get('latent_noise_start', 1.0)
@@ -566,12 +497,12 @@ class DGDTrainer:
                 noise_scale = noise_end + (noise_start - noise_end) * 0.5 * (1 + math.cos(math.pi * progress))
             else:
                 noise_scale = 0.0
-            
+
             for i, (index, x, labels_batch) in enumerate(train_loader):
                 decoder_optimizer.zero_grad()
-                
+
                 x, index = x.to(self.device), index.to(self.device)
-                
+
                 # Forward pass
                 z = rep(index)
 
@@ -582,7 +513,7 @@ class DGDTrainer:
 
                 y = model.decoder(z)
                 recon_loss = F.mse_loss(y, x, reduction='sum')
-                
+
                 # Add GMM loss if applicable
                 if epoch >= first_epoch_gmm and gmm is not None:
                     gmm_error = -self.training_config.lambda_gmm * torch.sum(gmm.score_samples(z))
@@ -590,43 +521,43 @@ class DGDTrainer:
                 else:
                     loss = recon_loss
                     gmm_error = torch.tensor(0.0).to(self.device)
-                
+
                 # Backward pass
                 loss.backward()
                 decoder_optimizer.step()
-                
+
                 # Step learning rate schedulers (OneCycleLR steps per batch)
                 if decoder_scheduler is not None:
                     decoder_scheduler.step()
-                
+
                 # Track losses
                 train_loss += loss.item()
                 recon_train_loss += recon_loss.item()
                 if epoch >= first_epoch_gmm:
                     gmm_train_loss += gmm_error.item()
-            
+
             trainrep_optimizer.step()
-            
+
             # Step trainrep scheduler
             if trainrep_scheduler is not None:
                 trainrep_scheduler.step()
-            
-            # Testing phase - update test representations only
+
+            # Validation phase - update val representations only
             model.decoder.eval()
-            testrep_optimizer.zero_grad()
-            
-            # Disable gradients for decoder parameters during test phase
+            valrep_optimizer.zero_grad()
+
+            # Disable gradients for decoder parameters during val phase
             for param in model.decoder.parameters():
                 param.requires_grad = False
-            
-            for i, (index, x, _) in enumerate(test_loader):
+
+            for i, (index, x, _) in enumerate(val_loader):
                 x, index = x.to(self.device), index.to(self.device)
-                
+
                 # Forward pass
-                z = test_rep(index)
+                z = val_rep(index)
                 y = model.decoder(z)
                 recon_loss = F.mse_loss(y, x, reduction='sum')
-                
+
                 # Add GMM loss if applicable
                 if epoch >= first_epoch_gmm and gmm is not None:
                     gmm_error = -self.training_config.lambda_gmm * torch.sum(gmm.score_samples(z))
@@ -634,116 +565,123 @@ class DGDTrainer:
                 else:
                     loss = recon_loss
                     gmm_error = torch.tensor(0.0).to(self.device)
-                
-                # Backward pass for test representations only
+
+                # Backward pass for val representations only
                 loss.backward()
-                
+
                 # Track losses
-                test_loss += loss.item()
-                recon_test_loss += recon_loss.item()
+                val_loss += loss.item()
+                recon_val_loss += recon_loss.item()
                 if epoch >= first_epoch_gmm:
-                    gmm_test_loss += gmm_error.item()
-            
+                    gmm_val_loss += gmm_error.item()
+
             # Re-enable gradients for decoder parameters
             for param in model.decoder.parameters():
                 param.requires_grad = True
-            
-            testrep_optimizer.step()
-            
-            # Step testrep scheduler  
-            if testrep_scheduler is not None:
-                testrep_scheduler.step()
-            
+
+            valrep_optimizer.step()
+
+            # Step valrep scheduler
+            if valrep_scheduler is not None:
+                valrep_scheduler.step()
+
             # Normalize losses
             train_loss /= len(train_loader.dataset)
-            test_loss /= len(test_loader.dataset)
+            val_loss /= len(val_loader.dataset)
             recon_train_loss /= len(train_loader.dataset)
-            recon_test_loss /= len(test_loader.dataset)
+            recon_val_loss /= len(val_loader.dataset)
             gmm_train_loss /= len(train_loader.dataset)
-            gmm_test_loss /= len(test_loader.dataset)
-            
+            gmm_val_loss /= len(val_loader.dataset)
+
             # Store losses
             self.train_losses.append(train_loss)
-            self.test_losses.append(test_loss)
+            self.val_losses.append(val_loss)
             self.recon_train_losses.append(recon_train_loss)
-            self.recon_test_losses.append(recon_test_loss)
+            self.recon_val_losses.append(recon_val_loss)
             self.gmm_train_losses.append(gmm_train_loss)
-            self.gmm_test_losses.append(gmm_test_loss)
-            
+            self.gmm_val_losses.append(gmm_val_loss)
+
             # Track learning rates (decoder LR)
             self.learning_rates.append(decoder_optimizer.param_groups[0]['lr'])
             # Track momentum (beta_1)
             self.momentum_betas.append(decoder_optimizer.param_groups[0]['betas'][0])
-            
+
             # Update best losses and early stopping
             if train_loss < self.best_train_loss:
                 self.best_train_loss = train_loss
-            if test_loss < self.best_test_loss:
-                self.best_test_loss = test_loss
+            if val_loss < self.best_val_loss:
+                self.best_val_loss = val_loss
                 self.best_epoch = epoch
                 # Save best model checkpoint (decoder and representations only)
                 self.best_model_state = {
                     'decoder': model.decoder.state_dict(),
                     'rep': rep.state_dict(),
-                    'test_rep': test_rep.state_dict()
+                    'val_rep': val_rep.state_dict()
                 }
-                # Reset early stopping counter when test loss improves
+                # Reset early stopping counter when val loss improves
                 if self.early_stopping_active:
                     self.epochs_without_improvement = 0
             elif self.early_stopping_active:
-                # Increment counter only if test loss didn't improve
+                # Increment counter only if val loss didn't improve
                 self.epochs_without_improvement += 1
             if recon_train_loss < self.best_recon_train:
                 self.best_recon_train = recon_train_loss
-            if recon_test_loss < self.best_recon_test:
-                self.best_recon_test = recon_test_loss
+            if recon_val_loss < self.best_recon_val:
+                self.best_recon_val = recon_val_loss
             if epoch >= first_epoch_gmm:
                 if gmm_train_loss < self.best_gmm_train:
                     self.best_gmm_train = gmm_train_loss
-                if gmm_test_loss < self.best_gmm_test:
-                    self.best_gmm_test = gmm_test_loss
-            
+                if gmm_val_loss < self.best_gmm_val:
+                    self.best_gmm_val = gmm_val_loss
+
             # Calculate timing
             epoch_duration = time.time() - epoch_start_time
             self.epoch_times.append(epoch_duration)
-            
+
             avg_epoch_time = sum(self.epoch_times) / len(self.epoch_times)
             remaining_epochs = self.training_config.epochs - epoch
             estimated_time_remaining = remaining_epochs * avg_epoch_time
-            
+
             epoch_time_str = str(timedelta(seconds=int(epoch_duration)))
             remaining_time_str = str(timedelta(seconds=int(estimated_time_remaining)))
-            
+
             # Get current learning rates
             lr_decoder = decoder_optimizer.param_groups[0]['lr']
             lr_rep = trainrep_optimizer.param_groups[0]['lr']
-            
+
             # Format GMM losses for display
             gmm_train_str = f"{gmm_train_loss:.4f} (B: {self.best_gmm_train:.4f})" if epoch >= first_epoch_gmm else "0.0000"
-            gmm_test_str = f"{gmm_test_loss:.4f} (B: {self.best_gmm_test:.4f})" if epoch >= first_epoch_gmm else "0.0000"
+            gmm_val_str = f"{gmm_val_loss:.4f} (B: {self.best_gmm_val:.4f})" if epoch >= first_epoch_gmm else "0.0000"
             train_ari_str = f", ARI={current_train_ari:.4f}, Sil={current_train_silhouette:.4f}" if epoch >= first_epoch_gmm else ""
-            test_ari_str = f", ARI={current_test_ari:.4f}, Sil={current_test_silhouette:.4f}" if epoch >= first_epoch_gmm else ""
-            
+            val_ari_str = f", ARI={current_val_ari:.4f}, Sil={current_val_silhouette:.4f}" if epoch >= first_epoch_gmm else ""
+
             print(f"Epoch {epoch}/{self.training_config.epochs} [Time per Epoch: {epoch_time_str}, Remaining Time: {remaining_time_str}, LR: Dec={lr_decoder:.2e}, Rep={lr_rep:.2e}, Noise={noise_scale:.4f}]")
             print(f"       - Train Loss: {train_loss:.4f} (B: {self.best_train_loss:.4f}), Recon: {recon_train_loss:.4f} (B: {self.best_recon_train:.4f}), GMM: {gmm_train_str}{train_ari_str}")
-            print(f"       - Test  Loss: {test_loss:.4f} (B: {self.best_test_loss:.4f}), Recon: {recon_test_loss:.4f} (B: {self.best_recon_test:.4f}), GMM: {gmm_test_str}{test_ari_str}")
+            print(f"       - Val   Loss: {val_loss:.4f} (B: {self.best_val_loss:.4f}), Recon: {recon_val_loss:.4f} (B: {self.best_recon_val:.4f}), GMM: {gmm_val_str}{val_ari_str}")
 
             # Check for early stopping (only if active)
             early_stopping_patience = getattr(self.training_config, 'early_stopping_patience', None)
             if self.early_stopping_active and early_stopping_patience is not None and self.epochs_without_improvement >= early_stopping_patience:
                 if self.verbose:
                     print(f"\nEarly stopping triggered after {epoch} epochs")
-                    print(f"   No improvement in test loss for {early_stopping_patience} consecutive epochs (since GMM activation)")
-                    print(f"   Best test loss: {self.best_test_loss:.4f} at epoch {self.best_epoch}")
+                    print(f"   No improvement in val loss for {early_stopping_patience} consecutive epochs (since GMM activation)")
+                    print(f"   Best val loss: {self.best_val_loss:.4f} at epoch {self.best_epoch}")
                 break
-        
+
+        # Persist the final-epoch state (whether training completed or stopped early)
+        save_checkpoint(
+            checkpoint_root / f"epoch_{epoch:04d}",
+            model.decoder, rep, val_rep, gmm,
+            metadata={'epoch': epoch, 'train_loss': self.train_losses[-1], 'val_loss': self.val_losses[-1]}
+        )
+
         # Restore best model checkpoint
         if self.best_model_state is not None:
             if self.verbose:
-                print(f"\nRestoring best model from epoch {self.best_epoch} (test loss: {self.best_test_loss:.4f})")
+                print(f"\nRestoring best model from epoch {self.best_epoch} (val loss: {self.best_val_loss:.4f})")
             model.decoder.load_state_dict(self.best_model_state['decoder'])
             rep.load_state_dict(self.best_model_state['rep'])
-            test_rep.load_state_dict(self.best_model_state['test_rep'])
+            val_rep.load_state_dict(self.best_model_state['val_rep'])
             # Refit GMM to the best representations
             if self.verbose:
                 print(f"   Refitting GMM to best representations...")
@@ -752,7 +690,7 @@ class DGDTrainer:
                 gmm.fit(representations, max_iter=self.config.model.gmm.max_iter)
             if self.verbose:
                 print(f"   GMM converged: {gmm.converged_} (iterations: {gmm.n_iter_})")
-        
+
         # Final GMM fit after training completes (for best generative model)
         final_gmm_fit = getattr(self.training_config, 'final_gmm_fit', False)
         if final_gmm_fit:
@@ -763,77 +701,54 @@ class DGDTrainer:
                 gmm.fit(representations, max_iter=self.config.model.gmm.max_iter)
             if self.verbose:
                 print(f"   Final GMM converged: {gmm.converged_} (iterations: {gmm.n_iter_})")
-        
-        # Plot final train latent space with best model
-        with torch.no_grad():
-            representations = rep.z.detach()
-            test_representations = test_rep.z.detach()
-            
-            # Calculate final metrics if GMM is fitted
-            if epoch >= first_epoch_gmm:
-                # Train metrics
-                predicted_labels = gmm.predict(representations)
-                final_train_ari = cluster_metrics.adjusted_rand_score(train_labels, predicted_labels)
-                final_train_silhouette = cluster_metrics.silhouette_score(representations, predicted_labels, gmm.n_components)
-                final_train_title = f"Final Train Latent Space (Best Model - Epoch {self.best_epoch}) - ARI: {final_train_ari:.4f}, Sil: {final_train_silhouette:.4f}"
-                
-                # Test metrics
-                test_predicted_labels = gmm.predict(test_representations)
-                final_test_ari = cluster_metrics.adjusted_rand_score(test_labels, test_predicted_labels)
-                final_test_silhouette = cluster_metrics.silhouette_score(test_representations, test_predicted_labels, gmm.n_components)
-                final_test_title = f"Final Test Latent Space (Best Model - Epoch {self.best_epoch}) - ARI: {final_test_ari:.4f}, Sil: {final_test_silhouette:.4f}"
-            else:
-                final_train_title = "Final Train Latent Space (After Training)"
-                final_test_title = "Final Test Latent Space (After Training)"
-            
-            # Plot train latent space
-            plot_latent_space(
-                representations=representations,
-                labels=train_labels,
-                gmm=gmm if epoch >= first_epoch_gmm else None,
-                class_names=class_names,
-                title=final_train_title,
-                save_path=None,
-                show=True,
-                verbose=self.verbose
-            )
-            
-            # Plot test latent space
-            plot_latent_space(
-                representations=test_representations,
-                labels=test_labels,
-                gmm=gmm if epoch >= first_epoch_gmm else None,
-                class_names=class_names,
-                title=final_test_title,
-                save_path=None,
-                show=True,
-                verbose=self.verbose
-            )
-        
-        # Plot final reconstructions
-        self._plot_reconstructions(model, rep, test_rep, epoch=epoch)
-        
+
+        # Persist the best model: decoder, train/val representations, GMM, config, and loss history
+        best_dir = experiment_dir / "best"
+        save_checkpoint(
+            best_dir,
+            model.decoder, rep, val_rep, gmm,
+            metadata={'best_epoch': self.best_epoch, 'best_val_loss': self.best_val_loss}
+        )
+        OmegaConf.save(self.config, str(best_dir / "config.yaml"))
+        torch.save({
+            'train_losses': self.train_losses,
+            'val_losses': self.val_losses,
+            'recon_train_losses': self.recon_train_losses,
+            'recon_val_losses': self.recon_val_losses,
+            'gmm_train_losses': self.gmm_train_losses,
+            'gmm_val_losses': self.gmm_val_losses,
+            'ari_scores': self.ari_scores,
+            'val_ari_scores': self.val_ari_scores,
+            'silhouette_scores': self.silhouette_scores,
+            'val_silhouette_scores': self.val_silhouette_scores,
+            'learning_rates': self.learning_rates,
+            'momentum_betas': self.momentum_betas,
+            'epoch_times': self.epoch_times,
+            'best_epoch': self.best_epoch,
+            'best_val_loss': self.best_val_loss,
+        }, best_dir / "training_results.pth")
+
         # Training complete
         total_time = time.time() - start_time
         if self.verbose:
             print(f"Training completed in {str(timedelta(seconds=int(total_time)))}")
             print(f"Final training loss: {self.train_losses[-1]:.4f}")
-            print(f"Final test loss: {self.test_losses[-1]:.4f}")
+            print(f"Final val loss: {self.val_losses[-1]:.4f}")
             print(f"Best train loss: {self.best_train_loss:.4f} at epoch {self.best_epoch}")
         else:
-            print(f"Training completed: {self.train_losses[-1]:.4f} train, {self.test_losses[-1]:.4f} test")
-        
+            print(f"Training completed: {self.train_losses[-1]:.4f} train, {self.val_losses[-1]:.4f} val")
+
         # Return results
         return {
             "model": model,
             "rep": rep,
-            "test_rep": test_rep,
+            "val_rep": val_rep,
             "gmm": gmm,
             "train_losses": self.train_losses,
-            "test_losses": self.test_losses,
+            "val_losses": self.val_losses,
             "total_time": total_time,
             "final_train_loss": self.train_losses[-1],
-            "final_test_loss": self.test_losses[-1],
+            "final_val_loss": self.val_losses[-1],
             "best_train_loss": self.best_train_loss,
             "best_epoch": self.best_epoch,
             "stopped_early": self.epochs_without_improvement >= getattr(self.training_config, 'early_stopping_patience', float('inf'))
