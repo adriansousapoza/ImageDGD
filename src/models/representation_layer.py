@@ -37,8 +37,10 @@ class RepresentationLayer(nn.Module):
             Number of samples. If values provided, derived from values unless 
             explicitly specified (must match if both provided).
         values : torch.Tensor, optional
-            Reference tensor for shape derivation. Representations still sampled 
-            from specified distribution.
+            Explicit representation values to use directly (e.g. when restoring a
+            saved layer via `load`, or seeding from a PCA projection via
+            `initialize_from_pca`). Takes precedence over `dist`/`dist_params`,
+            which are recorded as metadata but not used to resample.
         dist : str, default "normal"
             Distribution for sampling: "normal", "uniform", "laplace", "student_t", "uniform_ball", "uniform_sphere", "logistic", "hyperbolic", "zeros", "pca".
         dist_params : dict, optional
@@ -86,27 +88,33 @@ class RepresentationLayer(nn.Module):
         # Set dimensions before distribution sampling
         self._n_rep = n_samples
         self._dim = dim
-        
-        # Initialize based on distribution
-        dist_methods = {
-            "normal": self._get_rep_from_normal,
-            "uniform": self._get_rep_from_uniform,
-            "laplace": self._get_rep_from_laplace,
-            "student_t": self._get_rep_from_student_t,
-            "uniform_ball": self._get_rep_from_uniform_ball,
-            "uniform_sphere": self._get_rep_from_uniform_sphere,
-            "zeros": self._get_rep_from_zeros,
-            "logistic": self._get_rep_from_logistic,
-            "hyperbolic": self._get_rep_from_hyperbolic,
-            "pca": self._get_rep_from_pca
-        }
-        
-        if dist not in dist_methods:
-            available = ", ".join(f'"{d}"' for d in self.AVAILABLE_DISTS)
-            raise ValueError(f"Unsupported distribution '{dist}'. Available: {available}")
-        
-        self._z, self._options = dist_methods[dist](dist_params)
-        self._z = self._z.to(self.device)
+
+        if values is not None:
+            # Use the provided tensor directly (restoring a saved layer, or
+            # seeding from a PCA projection) instead of sampling fresh values.
+            self._z = nn.Parameter(values.clone().to(self.device), requires_grad=True)
+            self._options = {"dist_name": dist, **dist_params}
+        else:
+            # Initialize based on distribution
+            dist_methods = {
+                "normal": self._get_rep_from_normal,
+                "uniform": self._get_rep_from_uniform,
+                "laplace": self._get_rep_from_laplace,
+                "student_t": self._get_rep_from_student_t,
+                "uniform_ball": self._get_rep_from_uniform_ball,
+                "uniform_sphere": self._get_rep_from_uniform_sphere,
+                "zeros": self._get_rep_from_zeros,
+                "logistic": self._get_rep_from_logistic,
+                "hyperbolic": self._get_rep_from_hyperbolic,
+                "pca": self._get_rep_from_pca
+            }
+
+            if dist not in dist_methods:
+                available = ", ".join(f'"{d}"' for d in self.AVAILABLE_DISTS)
+                raise ValueError(f"Unsupported distribution '{dist}'. Available: {available}")
+
+            self._z, self._options = dist_methods[dist](dist_params)
+            self._z = self._z.to(self.device)
 
 
     def _get_rep_from_zeros(self, options: Dict[str, Any]) -> Tuple[Tensor, Dict[str, Any]]:
