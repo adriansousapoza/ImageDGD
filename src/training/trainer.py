@@ -614,9 +614,9 @@ class DGDTrainer:
                 self.best_epoch = epoch
                 # Save best model checkpoint (decoder and representations only)
                 self.best_model_state = {
-                    'decoder': model.decoder.state_dict(),
-                    'rep': rep.state_dict(),
-                    'val_rep': val_rep.state_dict()
+                    'decoder': {k: v.detach().clone() for k, v in model.decoder.state_dict().items()},
+                    'rep': {k: v.detach().clone() for k, v in rep.state_dict().items()},
+                    'val_rep': {k: v.detach().clone() for k, v in val_rep.state_dict().items()}
                 }
                 # Reset early stopping counter when val loss improves
                 if self.early_stopping_active:

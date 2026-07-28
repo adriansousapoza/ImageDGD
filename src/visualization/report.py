@@ -100,6 +100,34 @@ def generate_training_figures(
     config = OmegaConf.load(best_dir / "config.yaml")
     decoder_factory = _build_decoder_factory(config.model)
 
+    # Loss curves and training dynamics, from the persisted history. Plotted
+    # first (before the checkpoint walk below) so these PNGs are written and
+    # survive even if load_checkpoint raises partway through a malformed
+    # checkpoint directory during the walk.
+    history = torch.load(best_dir / "training_results.pth", map_location="cpu")
+    trainer_view = SimpleNamespace(
+        recon_train_losses=history['recon_train_losses'],
+        recon_val_losses=history['recon_val_losses'],
+        gmm_train_losses=history['gmm_train_losses'],
+        gmm_val_losses=history['gmm_val_losses'],
+        ari_scores=history['ari_scores'],
+        val_ari_scores=history['val_ari_scores'],
+        silhouette_scores=history['silhouette_scores'],
+        val_silhouette_scores=history['val_silhouette_scores'],
+        learning_rates=history['learning_rates'],
+        momentum_betas=history['momentum_betas'],
+        epoch_times=history['epoch_times'],
+        training_config=config.training,
+    )
+    plot_training_analysis(
+        history['train_losses'], history['val_losses'], trainer_view, config,
+        save_path=str(figures_dir / "loss_curves.png"), show=False,
+    )
+    plot_training_dynamics(
+        trainer_view,
+        save_path=str(figures_dir / "training_dynamics.png"), show=False,
+    )
+
     checkpoint_dirs = sorted(
         (experiment_dir / "checkpoints").glob("epoch_*"),
         key=_epoch_sort_key,
@@ -135,28 +163,3 @@ def generate_training_figures(
                     n_cols=8, cmap='viridis', denormalize=True, figsize=(16, 8),
                     save_path=str(figures_dir / f"gmm_component{component_idx:02d}_samples.png"), show=False,
                 )
-
-    # Loss curves and training dynamics, from the persisted history
-    history = torch.load(best_dir / "training_results.pth", map_location="cpu")
-    trainer_view = SimpleNamespace(
-        recon_train_losses=history['recon_train_losses'],
-        recon_val_losses=history['recon_val_losses'],
-        gmm_train_losses=history['gmm_train_losses'],
-        gmm_val_losses=history['gmm_val_losses'],
-        ari_scores=history['ari_scores'],
-        val_ari_scores=history['val_ari_scores'],
-        silhouette_scores=history['silhouette_scores'],
-        val_silhouette_scores=history['val_silhouette_scores'],
-        learning_rates=history['learning_rates'],
-        momentum_betas=history['momentum_betas'],
-        epoch_times=history['epoch_times'],
-        training_config=config.training,
-    )
-    plot_training_analysis(
-        history['train_losses'], history['val_losses'], trainer_view, config,
-        save_path=str(figures_dir / "loss_curves.png"), show=False,
-    )
-    plot_training_dynamics(
-        trainer_view,
-        save_path=str(figures_dir / "training_dynamics.png"), show=False,
-    )
