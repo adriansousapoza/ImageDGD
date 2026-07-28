@@ -6,6 +6,12 @@ random_seed: 42
 experiment_name: "ImageDGD_Default"
 description: "Default ImageDGD training configuration"
 
+# Filesystem roots for checkpoints and figures. Notebooks overwrite these with
+# absolute paths derived from project_root at runtime (same pattern as data.root_dir).
+paths:
+  models_dir: "./models"
+  figures_dir: "./figures"
+
 # Data configuration
 data:
   dataset_name: "FashionMNIST"
@@ -13,16 +19,19 @@ data:
   batch_size: 256
   num_workers: 4
   pin_memory: true
-  total_subset_fraction: 0.2
-  test_split: 0.5
+  total_subset_fraction: 1.0
+  val_split: 0.1
+  test_split: 0.1
   normalize: true
   download: true
   shuffle_train: true
+  shuffle_val: false
   shuffle_test: false
-  
+
   # Data transforms
   transforms:
     train: ['ToTensor']
+    val: ['ToTensor']
     test: ['ToTensor']
   
   # Class names for FashionMNIST
@@ -77,7 +86,7 @@ model:
   gmm:
     n_components: 20
     n_features: null # If null, uses representation n_features
-    covariance_type: "full"
+    covariance_type: "tied_spherical"
     max_iter: 1000
     tol: 1e-4
     reg_covar: 1e-6
@@ -108,7 +117,16 @@ training:
   refit_gmm_interval: 25
   lambda_gmm: 1.0
   final_gmm_fit: true
-  
+
+  # Post-hoc inference (Algorithm 2): optimizing representations for the
+  # held-out test split against a frozen decoder + GMM. M0 (prior_warmup_steps)
+  # must be < epochs — a fresh z far from every mode is dominated by the prior
+  # gradient before reconstruction has informed it where to go; a short
+  # reconstruction-only warm-up lets it find its basin first.
+  inference:
+    epochs: 200            # M: total optimization steps
+    prior_warmup_steps: 50 # M0: steps before the GMM prior term is added
+
   # Latent space noise injection (regularization)
   latent_noise_scale: 0.1   # Enable noise injection (0.0 = disabled)
   latent_noise_start: 1.0  # Starting noise scale (epoch 1)
