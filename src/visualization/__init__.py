@@ -16,6 +16,8 @@ from .loss import (
     plot_training_dynamics
 )
 
+from .report import generate_training_figures
+
 
 __all__ = [
     # Image visualization functions
@@ -30,4 +32,6 @@ __all__ = [
     # Loss and dynamics visualization functions
     'plot_training_analysis',
     'plot_training_dynamics',
+    # Post-hoc report generation
+    'generate_training_figures',
 ]
