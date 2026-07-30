@@ -6,11 +6,13 @@ random_seed: 42
 experiment_name: "ImageDGD_Default"
 description: "Default ImageDGD training configuration"
 
-# Filesystem roots for checkpoints and figures. Notebooks overwrite these with
-# absolute paths derived from project_root at runtime (same pattern as data.root_dir).
+# Filesystem root for timestamped experiment run folders. Notebooks overwrite
+# this with an absolute path derived from project_root at runtime (same
+# pattern as data.root_dir), then resolve config.paths.models_dir/figures_dir
+# to point inside that run's own timestamped folder before training/inference
+# starts, so no run ever overwrites another's checkpoints or figures.
 paths:
-  models_dir: "./models"
-  figures_dir: "./figures"
+  experiments_dir: "./experiments"
 
 # Data configuration
 data:
@@ -106,15 +108,15 @@ model:
 
 # Training configuration
 training:
-  epochs: 100
+  epochs: 200
   device: "auto"
   
   # Early stopping
   early_stopping_patience: 10
   
   # GMM training schedule
-  first_epoch_gmm: 25
-  refit_gmm_interval: 25
+  first_epoch_gmm: 0
+  refit_gmm_interval: 10
   lambda_gmm: 1.0
   final_gmm_fit: true
 
@@ -125,7 +127,12 @@ training:
   # reconstruction-only warm-up lets it find its basin first.
   inference:
     epochs: 200            # M: total optimization steps
-    prior_warmup_steps: 50 # M0: steps before the GMM prior term is added
+    prior_warmup_steps: 0 # M0: steps before the GMM prior term is added
+    # Independent of the top-level latent_noise_scale/_start/_end above --
+    # inference noise can be tuned without touching training's config.
+    latent_noise_scale: 0.1   # Enable noise injection (0.0 = disabled)
+    latent_noise_start: 1.0  # Starting noise scale (step 1)
+    latent_noise_end: 0.01     # Ending noise scale (final step M)
 
   # Latent space noise injection (regularization)
   latent_noise_scale: 0.1   # Enable noise injection (0.0 = disabled)
