@@ -84,7 +84,21 @@ OmegaConf.save(config, str(run_dir / "config.yaml"))
 print(f"Run directory: {run_dir}")
 ```
 
-Everything downstream in the notebook (the `trainer.train(...)` call, the `generate_training_figures(...)` call) already reads `config.paths.models_dir`/`figures_dir` and needs no further change — both now resolve under `run_dir`.
+The `trainer.train(...)` call needs no further change — it reads `config.paths.models_dir` and now resolves it correctly under `run_dir`. The figures cell, however, currently re-joins the experiment name a second time:
+
+```python
+experiment_dir = Path(config.paths.models_dir) / config.experiment_name
+figures_dir = Path(config.paths.figures_dir) / config.experiment_name
+```
+
+Since `config.paths.models_dir`/`figures_dir` already point inside the unique `run_dir` (no experiment-name join needed, mirroring the same fix in `trainer.py`'s `train()`), this becomes:
+
+```python
+experiment_dir = Path(config.paths.models_dir)
+figures_dir = Path(config.paths.figures_dir)
+```
+
+Everything else in that cell (the `generate_training_figures(...)` call) is unchanged.
 
 ### `notebooks/dgd_test_inference.ipynb`
 
@@ -213,16 +227,22 @@ def generate_inference_figures(
     sample_data: Tuple,
     step_history: dict,
     device: torch.device,
-) -> None:
+) -> Tuple[float, float]:
     """
     Write latent-space, reconstruction, loss-curve, and GMM-component-sample
     figures for one inference run, mirroring generate_training_figures'
     output categories but for a single optimized representation layer
-    instead of a train/val pair across many checkpoints.
+    instead of a train/val pair across many checkpoints. Computes AMI/ARI
+    internally (it already needs the GMM's predicted labels to draw the
+    latent-space plot) and returns them, so the caller doesn't duplicate the
+    computation just to print it.
+
+    Returns (test_ami, test_ari) — the same values used in the latent-space
+    plot title.
     """
 ```
 
-Writes: `latent_test.png` (via `plot_latent_space`, same as today), `recon_test.png` (via `plot_images_by_class`, same as today), `loss_curve.png` (via the new `plot_inference_analysis`, fed from `step_history['loss']`/`['recon']`/`['gmm']`/`['noise']`), and the GMM-component grids via `_plot_gmm_component_samples`.
+Writes: `latent_test.png` (via `plot_latent_space`, title now includes `AMI: {test_ami:.4f}, ARI: {test_ari:.4f}`), `recon_test.png` (via `plot_images_by_class`, same as today), `loss_curve.png` (via the new `plot_inference_analysis`, fed from `step_history['loss']`/`['recon']`/`['gmm']`/`['noise']`), and the GMM-component grids via `_plot_gmm_component_samples`. Needs `from tgmm import ClusteringMetrics` added to `report.py`'s imports.
 
 ### `notebooks/dgd_test_inference.ipynb`
 
@@ -242,7 +262,7 @@ for m in range(1, M + 1):
         print(f"Step {m}/{M}: loss={total_loss/n_test:.4f}, recon={total_recon/n_test:.4f}, gmm={total_gmm/n_test:.4f}, noise={noise_scale_m:.4f}")
 ```
 
-The final figures cell computes `test_ami`/`test_ari`, prints them, then calls `generate_inference_figures(figures_dir, decoder, gmm, test_rep, test_labels, class_names, sample_data, step_history, device)` in place of the current inline `plot_latent_space`/`plot_images_by_class` calls. `sample_data` here is exactly the 3-tuple `(indices_test_sample, images_test_sample, labels_test_sample)` already built by `collect_class_samples` earlier in the cell — deliberately a 3-tuple, not `generate_training_figures`' 6-tuple (which carries a train half and a val half); `generate_inference_figures` has only one split to plot. Internally, `generate_inference_figures` computes the reconstruction the same way `_plot_checkpoint_figures` does — `decoder(test_rep(indices_test_sample.to(device)))` — rather than receiving pre-computed reconstructed images.
+The final figures cell calls `test_ami, test_ari = generate_inference_figures(figures_dir, decoder, gmm, test_rep, test_labels, class_names, sample_data, step_history, device)` in place of the current inline `plot_latent_space`/`plot_images_by_class` calls, then prints the returned values. `sample_data` here is exactly the 3-tuple `(indices_test_sample, images_test_sample, labels_test_sample)` already built by `collect_class_samples` earlier in the cell — deliberately a 3-tuple, not `generate_training_figures`' 6-tuple (which carries a train half and a val half); `generate_inference_figures` has only one split to plot. Internally, `generate_inference_figures` computes the reconstruction the same way `_plot_checkpoint_figures` does — `decoder(test_rep(indices_test_sample.to(device)))` — rather than receiving pre-computed reconstructed images. Since metric computation moves into `generate_inference_figures`, the notebook's own `from tgmm import ClusteringMetrics` import and direct `plot_latent_space`/`plot_images_by_class` imports are no longer used and are removed from the setup cell's imports (replaced by `generate_inference_figures` in the `from src.visualization import ...` line).
 
 ## 5. Two visualization bug fixes — `src/visualization/latent.py`
 
