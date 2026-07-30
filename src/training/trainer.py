@@ -9,7 +9,7 @@ import math
 from datetime import timedelta
 from pathlib import Path
 from typing import Dict, List, Tuple, Optional, Any
-from omegaconf import DictConfig, OmegaConf
+from omegaconf import DictConfig
 from tqdm import tqdm
 import numpy as np
 
@@ -325,7 +325,11 @@ class DGDTrainer:
         self.sample_data = sample_data
         self.class_names = class_names
 
-        experiment_dir = Path(self.config.paths.models_dir) / self.config.experiment_name
+        # config.paths.models_dir is already a unique, timestamped path
+        # (resolved by the calling notebook, e.g.
+        # experiments/<timestamp>_<experiment_name>/models) -- no
+        # experiment_name join needed here.
+        experiment_dir = Path(self.config.paths.models_dir)
         checkpoint_root = experiment_dir / "checkpoints"
 
         # Create model components
@@ -680,14 +684,16 @@ class DGDTrainer:
             if self.verbose:
                 print(f"   Final GMM converged: {gmm.converged_} (iterations: {gmm.n_iter_})")
 
-        # Persist the best model: decoder, train/val representations, GMM, config, and loss history
+        # Persist the best model: decoder, train/val representations, GMM,
+        # and loss history. The config.yaml copy for this run lives at the
+        # run folder's root (written once by the calling notebook when the
+        # run folder is created), not duplicated here.
         best_dir = experiment_dir / "best"
         save_checkpoint(
             best_dir,
             model.decoder, rep, val_rep, gmm,
             metadata={'best_epoch': self.best_epoch, 'best_val_loss': self.best_val_loss}
         )
-        OmegaConf.save(self.config, str(best_dir / "config.yaml"))
         torch.save({
             'train_losses': self.train_losses,
             'val_losses': self.val_losses,
