@@ -182,11 +182,17 @@ def plot_latent_space(
         print("Computing t-SNE...")
     try:
         if using_cuml:
-            # cuML TSNE: n_neighbors should be at least 3 * perplexity
+            # cuML's default n_neighbors (90) sits exactly on 3*perplexity
+            # (30), and cuML's internal check requires strictly more than
+            # that boundary -- the default always triggers a spurious "# of
+            # Nearest Neighbors should be at least 3 * perplexity" warning.
+            # One above the boundary silences it with no effect on results.
+            # sklearn.manifold.TSNE has no n_neighbors parameter at all, so
+            # this only applies to the cuML branch.
             # Don't pass random_state to avoid brute_force_knn warning
-            tsne = TSNE(n_components=n_components, perplexity=30, n_iter=1000)
+            tsne = TSNE(n_components=n_components, perplexity=30, max_iter=1000, n_neighbors=3 * 30 + 1)
         else:
-            tsne = TSNE(n_components=n_components, random_state=random_state, perplexity=30, n_iter=1000)
+            tsne = TSNE(n_components=n_components, random_state=random_state, perplexity=30, max_iter=1000)
         z_tsne = tsne.fit_transform(z_gpu)
         
         if using_cuml:
@@ -316,30 +322,32 @@ def _add_gmm_overlay_pca(ax: plt.Axes, gmm, pca, using_cuml: bool):
             mean_pca_i = means_pca[i]
             weight = weights[i]
             
-            # Get covariance matrix using tgmm helper if available
-            if TGMM_PLOTTING_AVAILABLE:
-                cov = get_covariance_matrix(gmm, i).numpy()
+            # Always build the covariance matrix locally rather than via
+            # tgmm.plotting.get_covariance_matrix: that helper hardcodes a
+            # 2x2 result for spherical/tied_spherical types (it's designed
+            # for GMMs already living in 2D, for tgmm's own native
+            # plotting). Here the GMM has n_features dimensions and needs
+            # the full n_features x n_features matrix to project through
+            # PCA correctly.
+            covariances = gmm.covariances_.detach().cpu().numpy() if isinstance(gmm.covariances_, torch.Tensor) else gmm.covariances_
+
+            # Handle different covariance types
+            if gmm.covariance_type == 'full':
+                cov = covariances[i]
+            elif gmm.covariance_type == 'diag':
+                cov = np.diag(covariances[i])
+            elif gmm.covariance_type == 'spherical':
+                cov = covariances[i] * np.eye(n_features)
+            elif gmm.covariance_type == 'tied_full':
+                cov = covariances
+            elif gmm.covariance_type == 'tied_diag':
+                cov = np.diag(covariances)
+            elif gmm.covariance_type == 'tied_spherical':
+                cov = covariances.item() * np.eye(n_features) if isinstance(covariances, np.ndarray) else covariances * np.eye(n_features)
             else:
-                # Fallback implementation
-                covariances = gmm.covariances_.detach().cpu().numpy() if isinstance(gmm.covariances_, torch.Tensor) else gmm.covariances_
-                
-                # Handle different covariance types
-                if gmm.covariance_type == 'full':
-                    cov = covariances[i]
-                elif gmm.covariance_type == 'diag':
-                    cov = np.diag(covariances[i])
-                elif gmm.covariance_type == 'spherical':
-                    cov = covariances[i] * np.eye(n_features)
-                elif gmm.covariance_type == 'tied_full':
-                    cov = covariances
-                elif gmm.covariance_type == 'tied_diag':
-                    cov = np.diag(covariances)
-                elif gmm.covariance_type == 'tied_spherical':
-                    cov = covariances.item() * np.eye(n_features) if isinstance(covariances, np.ndarray) else covariances * np.eye(n_features)
-                else:
-                    # Unknown type, skip
-                    print(f"Warning: Unknown covariance type {gmm.covariance_type}")
-                    continue
+                # Unknown type, skip
+                print(f"Warning: Unknown covariance type {gmm.covariance_type}")
+                continue
             
             # Transform covariance to PCA space
             cov_pca = components @ cov @ components.T
