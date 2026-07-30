@@ -506,8 +506,9 @@ class DGDTrainer:
                 # Forward pass
                 z = rep(index)
 
-                # Latent Space Noise Injection (regularization during training)
-                if model.decoder.training and noise_scale > 0:
+                # Latent Space Noise Injection (regularization, applied in
+                # both train and val phases so noise robustness generalizes)
+                if noise_scale > 0:
                     noise = torch.randn_like(z) * noise_scale
                     z = z + noise
 
@@ -555,6 +556,13 @@ class DGDTrainer:
 
                 # Forward pass
                 z = val_rep(index)
+
+                # Latent Space Noise Injection (same per-epoch schedule as
+                # the train phase above — no separate/independent schedule)
+                if noise_scale > 0:
+                    noise = torch.randn_like(z) * noise_scale
+                    z = z + noise
+
                 y = model.decoder(z)
                 recon_loss = F.mse_loss(y, x, reduction='sum')
 
