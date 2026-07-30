@@ -113,59 +113,50 @@ def plot_training_analysis(
         axes[2].text(0.5, 0.5, 'GMM not fitted yet\nor no GMM loss', ha='center', va='center', transform=axes[2].transAxes)
         axes[2].set_title('GMM Loss')
 
-    # 4. Clustering Metrics (ARI and Silhouette Score)
-    if hasattr(trainer, 'ari_scores') and len(trainer.ari_scores) > 0:
-        ari_scores = trainer.ari_scores
-        val_ari_scores = trainer.val_ari_scores if hasattr(trainer, 'val_ari_scores') else []
-        silhouette_scores = trainer.silhouette_scores if hasattr(trainer, 'silhouette_scores') else []
-        val_silhouette_scores = trainer.val_silhouette_scores if hasattr(trainer, 'val_silhouette_scores') else []
+    # 4. Clustering Quality (NMI)
+    if hasattr(trainer, 'nmi_scores') and len(trainer.nmi_scores) > 0:
+        nmi_scores = trainer.nmi_scores
+        val_nmi_scores = trainer.val_nmi_scores if hasattr(trainer, 'val_nmi_scores') else []
 
-        # Find epochs where metrics were computed (non-zero GMM epochs)
-        metric_epochs = [i+1 for i, x in enumerate(gmm_train_losses) if x != 0 and i >= start_idx]
+        # Find epochs where metrics were computed (non-zero GMM epochs).
+        # NOT filtered by start_idx here: nmi_scores/val_nmi_scores gain one
+        # entry per GMM-active epoch unconditionally (trainer.py appends them
+        # every time, regardless of skip_first_epoch), so their natural x-axis
+        # is unfiltered too. Filtering here would desync the two whenever the
+        # GMM is active starting at epoch 1 itself (metric_epochs would drop
+        # epoch 1 while the score lists still include its entry).
+        metric_epochs = [i+1 for i, x in enumerate(gmm_train_losses) if x != 0]
 
-        # Create twin axes for different y-scales
-        ax_ari = axes[3]
-        ax_sil = ax_ari.twinx()
+        def _align(epochs, values):
+            """Trim both to the same length, keeping the most recent entries.
 
-        # Plot ARI scores
-        if len(ari_scores) > 0:
-            line1 = ax_ari.plot(metric_epochs[:len(ari_scores)], ari_scores, 'b-', label='Train ARI', linewidth=2, marker='o')
-        if len(val_ari_scores) > 0:
-            line2 = ax_ari.plot(metric_epochs[:len(val_ari_scores)], val_ari_scores, 'r-', label='Val ARI', linewidth=2, marker='o')
+            metric_epochs and the *_scores lists are built from independent
+            conditions in trainer.py and can end up a handful of entries
+            apart at the start (e.g. a GMM refit that fires before
+            first_epoch_gmm). Aligning from the end keeps every value
+            correctly paired with its epoch instead of crashing or silently
+            mis-pairing when lengths differ.
+            """
+            n = min(len(epochs), len(values))
+            return epochs[-n:], values[-n:]
 
-        # Plot Silhouette scores
-        if len(silhouette_scores) > 0:
-            line3 = ax_sil.plot(metric_epochs[:len(silhouette_scores)], silhouette_scores, 'g--', label='Train Silhouette', linewidth=2, marker='s')
-        if len(val_silhouette_scores) > 0:
-            line4 = ax_sil.plot(metric_epochs[:len(val_silhouette_scores)], val_silhouette_scores, 'orange', linestyle='--', label='Val Silhouette', linewidth=2, marker='s')
+        ax_nmi = axes[3]
 
-        ax_ari.set_xlabel('Epoch')
-        ax_ari.set_ylabel('ARI Score', color='b')
-        ax_sil.set_ylabel('Silhouette Score', color='g')
-        ax_ari.set_title('Clustering Metrics (ARI & Silhouette)')
-        ax_ari.tick_params(axis='y', labelcolor='b')
-        ax_sil.tick_params(axis='y', labelcolor='g')
-        ax_ari.grid(True, alpha=0.3)
+        if len(nmi_scores) > 0:
+            x, y = _align(metric_epochs, nmi_scores)
+            ax_nmi.plot(x, y, 'b-', label='Train NMI', linewidth=2, marker='o')
+        if len(val_nmi_scores) > 0:
+            x, y = _align(metric_epochs, val_nmi_scores)
+            ax_nmi.plot(x, y, 'r-', label='Val NMI', linewidth=2, marker='o')
 
-        # Combine legends
-        lines = []
-        labels = []
-        if len(ari_scores) > 0:
-            lines.extend(line1)
-            labels.append('Train ARI')
-        if len(val_ari_scores) > 0:
-            lines.extend(line2)
-            labels.append('Val ARI')
-        if len(silhouette_scores) > 0:
-            lines.extend(line3)
-            labels.append('Train Silhouette')
-        if len(val_silhouette_scores) > 0:
-            lines.extend(line4)
-            labels.append('Val Silhouette')
-        ax_ari.legend(lines, labels, loc='best')
+        ax_nmi.set_xlabel('Epoch')
+        ax_nmi.set_ylabel('NMI Score')
+        ax_nmi.set_title('Clustering Quality (NMI)')
+        ax_nmi.legend(loc='best')
+        ax_nmi.grid(True, alpha=0.3)
     else:
         axes[3].text(0.5, 0.5, 'No clustering metrics\navailable', ha='center', va='center', transform=axes[3].transAxes)
-        axes[3].set_title('Clustering Metrics')
+        axes[3].set_title('Clustering Quality (NMI)')
 
     plt.tight_layout()
 
