@@ -16,7 +16,7 @@ from .loss import (
     plot_training_dynamics
 )
 
-from .report import generate_training_figures
+from .report import generate_training_figures, generate_inference_figures
 
 
 __all__ = [
@@ -34,4 +34,5 @@ __all__ = [
     'plot_training_dynamics',
     # Post-hoc report generation
     'generate_training_figures',
+    'generate_inference_figures',
 ]
