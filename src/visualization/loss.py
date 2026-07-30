@@ -113,13 +113,15 @@ def plot_training_analysis(
         axes[2].text(0.5, 0.5, 'GMM not fitted yet\nor no GMM loss', ha='center', va='center', transform=axes[2].transAxes)
         axes[2].set_title('GMM Loss')
 
-    # 4. Clustering Quality (NMI)
-    if hasattr(trainer, 'nmi_scores') and len(trainer.nmi_scores) > 0:
-        nmi_scores = trainer.nmi_scores
-        val_nmi_scores = trainer.val_nmi_scores if hasattr(trainer, 'val_nmi_scores') else []
+    # 4. Clustering Quality (AMI & ARI)
+    if hasattr(trainer, 'ami_scores') and len(trainer.ami_scores) > 0:
+        ami_scores = trainer.ami_scores
+        val_ami_scores = trainer.val_ami_scores if hasattr(trainer, 'val_ami_scores') else []
+        ari_scores = trainer.ari_scores if hasattr(trainer, 'ari_scores') else []
+        val_ari_scores = trainer.val_ari_scores if hasattr(trainer, 'val_ari_scores') else []
 
         # Find epochs where metrics were computed (non-zero GMM epochs).
-        # NOT filtered by start_idx here: nmi_scores/val_nmi_scores gain one
+        # NOT filtered by start_idx here: ami_scores/ari_scores gain one
         # entry per GMM-active epoch unconditionally (trainer.py appends them
         # every time, regardless of skip_first_epoch), so their natural x-axis
         # is unfiltered too. Filtering here would desync the two whenever the
@@ -140,23 +142,29 @@ def plot_training_analysis(
             n = min(len(epochs), len(values))
             return epochs[-n:], values[-n:]
 
-        ax_nmi = axes[3]
+        ax_metrics = axes[3]
 
-        if len(nmi_scores) > 0:
-            x, y = _align(metric_epochs, nmi_scores)
-            ax_nmi.plot(x, y, 'b-', label='Train NMI', linewidth=2, marker='o')
-        if len(val_nmi_scores) > 0:
-            x, y = _align(metric_epochs, val_nmi_scores)
-            ax_nmi.plot(x, y, 'r-', label='Val NMI', linewidth=2, marker='o')
+        if len(ami_scores) > 0:
+            x, y = _align(metric_epochs, ami_scores)
+            ax_metrics.plot(x, y, 'b-', label='Train AMI', linewidth=2, marker='o')
+        if len(val_ami_scores) > 0:
+            x, y = _align(metric_epochs, val_ami_scores)
+            ax_metrics.plot(x, y, 'r-', label='Val AMI', linewidth=2, marker='o')
+        if len(ari_scores) > 0:
+            x, y = _align(metric_epochs, ari_scores)
+            ax_metrics.plot(x, y, 'g--', label='Train ARI', linewidth=2, marker='s')
+        if len(val_ari_scores) > 0:
+            x, y = _align(metric_epochs, val_ari_scores)
+            ax_metrics.plot(x, y, 'orange', linestyle='--', label='Val ARI', linewidth=2, marker='s')
 
-        ax_nmi.set_xlabel('Epoch')
-        ax_nmi.set_ylabel('NMI Score')
-        ax_nmi.set_title('Clustering Quality (NMI)')
-        ax_nmi.legend(loc='best')
-        ax_nmi.grid(True, alpha=0.3)
+        ax_metrics.set_xlabel('Epoch')
+        ax_metrics.set_ylabel('Score')
+        ax_metrics.set_title('Clustering Quality (AMI & ARI)')
+        ax_metrics.legend(loc='best')
+        ax_metrics.grid(True, alpha=0.3)
     else:
         axes[3].text(0.5, 0.5, 'No clustering metrics\navailable', ha='center', va='center', transform=axes[3].transAxes)
-        axes[3].set_title('Clustering Quality (NMI)')
+        axes[3].set_title('Clustering Quality (AMI & ARI)')
 
     plt.tight_layout()
 
@@ -291,3 +299,78 @@ def plot_training_dynamics(
         plt.close(fig2)
 
     return fig2
+
+
+def plot_inference_analysis(
+    step_losses: List[float],
+    step_recon: List[float],
+    step_gmm: List[float],
+    step_noise: List[float],
+    save_path: Optional[str] = None,
+    show: bool = True
+) -> plt.Figure:
+    """
+    Plot the M-step inference optimization (Algorithm 2): total loss,
+    reconstruction loss, GMM error, and noise scale, each vs. optimization
+    step m. Unlike plot_training_analysis there is no train/val split (a
+    single representation layer is optimized) and no learning-rate/momentum/
+    epoch-timing panel (Algorithm 2 has no LR schedule or per-epoch timing).
+
+    Parameters
+    ----------
+    step_losses : List[float]
+        Total loss per optimization step m
+    step_recon : List[float]
+        Reconstruction loss per optimization step m
+    step_gmm : List[float]
+        GMM error per optimization step m
+    step_noise : List[float]
+        Noise scale per optimization step m
+    save_path : Optional path to save the figure
+    show : Whether to display the figure
+    """
+    fig, axes = plt.subplots(2, 2, figsize=(16, 12))
+    fig.suptitle('DGD Inference Analysis (Algorithm 2)', fontsize=16, fontweight='bold')
+    axes = axes.flatten()
+
+    steps = range(1, len(step_losses) + 1)
+
+    axes[0].plot(steps, step_losses, 'b-', label='Total Loss', linewidth=2)
+    axes[0].set_xlabel('Step (m)')
+    axes[0].set_ylabel('Loss')
+    axes[0].set_title('Total Loss')
+    axes[0].legend()
+    axes[0].grid(True, alpha=0.3)
+
+    axes[1].plot(steps, step_recon, 'g-', label='Reconstruction Loss', linewidth=2)
+    axes[1].set_xlabel('Step (m)')
+    axes[1].set_ylabel('Reconstruction Loss')
+    axes[1].set_title('Reconstruction Loss')
+    axes[1].legend()
+    axes[1].grid(True, alpha=0.3)
+
+    axes[2].plot(steps, step_gmm, 'purple', label='GMM Error', linewidth=2)
+    axes[2].set_xlabel('Step (m)')
+    axes[2].set_ylabel('GMM Error')
+    axes[2].set_title('GMM Error')
+    axes[2].legend()
+    axes[2].grid(True, alpha=0.3)
+
+    axes[3].plot(steps, step_noise, 'orange', label='Noise Scale', linewidth=2)
+    axes[3].set_xlabel('Step (m)')
+    axes[3].set_ylabel('Noise Scale')
+    axes[3].set_title('Noise Schedule')
+    axes[3].legend()
+    axes[3].grid(True, alpha=0.3)
+
+    plt.tight_layout()
+
+    if save_path:
+        fig.savefig(save_path, dpi=150, bbox_inches='tight')
+
+    if show:
+        plt.show()
+    else:
+        plt.close(fig)
+
+    return fig
