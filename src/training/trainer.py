@@ -650,15 +650,7 @@ class DGDTrainer:
         save_checkpoint(
             checkpoint_root / f"epoch_{epoch:04d}",
             model.decoder, rep, val_rep, gmm,
-            metadata={
-                'epoch': epoch,
-                'train_ami': current_train_ami,
-                'val_ami': current_val_ami,
-                'train_ari': current_train_ari,
-                'val_ari': current_val_ari,
-                'train_loss': self.train_losses[-1],
-                'val_loss': self.val_losses[-1]
-            }
+            metadata={'epoch': epoch, 'train_loss': self.train_losses[-1], 'val_loss': self.val_losses[-1]}
         )
 
         # Restore best model checkpoint
