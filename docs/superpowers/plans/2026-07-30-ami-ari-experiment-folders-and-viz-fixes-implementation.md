@@ -1389,6 +1389,7 @@ nb = json.loads(nb_path.read_text())
 old_config_cell = "".join(nb["cells"][2]["source"])
 assert 'config.paths.models_dir = str(project_root / "models")' in old_config_cell, "cell 2 source has changed unexpectedly"
 new_config_cell = '''from datetime import datetime
+from omegaconf import open_dict
 
 with initialize(version_base=None, config_path="../config"):
     config = compose(config_name="config")
@@ -1405,8 +1406,15 @@ timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 run_dir = Path(config.paths.experiments_dir) / f"{timestamp}_{config.experiment_name}"
 run_dir.mkdir(parents=True, exist_ok=True)
 
-config.paths.models_dir = str(run_dir / "models")
-config.paths.figures_dir = str(run_dir / "figures")
+# hydra's compose() returns a struct-mode config: models_dir/figures_dir
+# aren't in config.yaml's paths: block (only experiments_dir is, since they
+# are resolved per-run rather than being static defaults), so assigning
+# them requires open_dict() to temporarily allow new keys -- a plain
+# assignment would raise ConfigAttributeError: Key 'models_dir' is not in
+# struct.
+with open_dict(config):
+    config.paths.models_dir = str(run_dir / "models")
+    config.paths.figures_dir = str(run_dir / "figures")
 
 OmegaConf.save(config, str(run_dir / "config.yaml"))
 print(f"Run directory: {run_dir}")
@@ -1489,14 +1497,20 @@ Expected: `cells: ['markdown', 'code', 'code', 'code', 'code', 'code']` then `OK
 import time
 from datetime import datetime
 from pathlib import Path
-from omegaconf import OmegaConf
+from omegaconf import OmegaConf, open_dict
+from hydra import initialize, compose
 import torch
 from src.data import create_dataloaders, get_sample_batches, collect_all_labels
 from src.training import DGDTrainer
 from src.visualization import generate_training_figures
 
 def run_once(experiments_dir):
-    config = OmegaConf.load('config/config.yaml')
+    # Loaded via hydra.compose(), matching the real notebook exactly (not
+    # OmegaConf.load(), which -- unlike compose() -- does NOT produce a
+    # struct-mode config and would silently fail to catch a missing
+    # open_dict() in the cell this mirrors).
+    with initialize(version_base=None, config_path='config'):
+        config = compose(config_name='config')
     config.data.total_subset_fraction = 0.02
     config.data.download = False
     config.experiment_name = 'plan_smoke_two_runs'
@@ -1506,8 +1520,9 @@ def run_once(experiments_dir):
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
     run_dir = Path(config.paths.experiments_dir) / f'{timestamp}_{config.experiment_name}'
     run_dir.mkdir(parents=True, exist_ok=True)
-    config.paths.models_dir = str(run_dir / 'models')
-    config.paths.figures_dir = str(run_dir / 'figures')
+    with open_dict(config):
+        config.paths.models_dir = str(run_dir / 'models')
+        config.paths.figures_dir = str(run_dir / 'figures')
     OmegaConf.save(config, str(run_dir / 'config.yaml'))
 
     config.training.epochs = 2
@@ -1588,7 +1603,7 @@ warnings.filterwarnings('ignore')
 import torch
 import torch.nn.functional as F
 
-from omegaconf import OmegaConf
+from omegaconf import OmegaConf, open_dict
 from hydra import initialize, compose
 
 current_dir = Path.cwd()
@@ -1634,7 +1649,13 @@ assert candidates, (
 run_dir = candidates[-1]  # newest, since the timestamp prefix sorts lexicographically
 print(f"Using training run: {run_dir}")
 
-config.paths.models_dir = str(run_dir / "models")
+# hydra's compose() returns a struct-mode config: models_dir isn't in
+# config.yaml's paths: block (only experiments_dir is, since it's resolved
+# per-run rather than being a static default), so assigning it requires
+# open_dict() to temporarily allow a new key -- a plain assignment would
+# raise ConfigAttributeError: Key 'models_dir' is not in struct.
+with open_dict(config):
+    config.paths.models_dir = str(run_dir / "models")
 
 # Guard: make sure this notebook's config matches the config actually used
 # during training, so `test_loader` below is exactly the held-out split
@@ -1881,7 +1902,8 @@ Expected: `cells: ['markdown', 'code', 'code', 'code', 'code', 'code', 'code', '
 /home/asp/.venvs/rapids_cu13/bin/python -c "
 from datetime import datetime
 from pathlib import Path
-from omegaconf import OmegaConf
+from omegaconf import OmegaConf, open_dict
+from hydra import initialize, compose
 import torch
 import torch.nn.functional as F
 import math
@@ -1891,36 +1913,52 @@ from src.models import RepresentationLayer, ConvDecoder
 from src.utils.checkpoint import load_checkpoint
 from src.visualization import generate_inference_figures
 
-# 1. Train a tiny model into a timestamped run folder (mirrors Task 8's notebook).
-config = OmegaConf.load('config/config.yaml')
+# 1. Train a tiny model into a timestamped run folder (mirrors Task 8's
+# notebook). OmegaConf.load() here is fine -- Task 8's own struct-mode
+# handling is validated separately, in Task 8's own verification; this
+# phase just needs a real trained run for phase 2 to discover.
+train_config = OmegaConf.load('config/config.yaml')
+train_config.data.total_subset_fraction = 0.02
+train_config.data.download = False
+train_config.experiment_name = 'plan_smoke_full_inference'
+experiments_dir = Path('/tmp/plan_smoke_experiments_full_inference')
+timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+run_dir = experiments_dir / f'{timestamp}_{train_config.experiment_name}'
+run_dir.mkdir(parents=True, exist_ok=True)
+train_config.paths.models_dir = str(run_dir / 'models')
+train_config.paths.figures_dir = str(run_dir / 'figures')
+OmegaConf.save(train_config, str(run_dir / 'config.yaml'))
+
+train_config.training.epochs = 2
+train_config.training.first_epoch_gmm = 1
+train_config.training.refit_gmm_interval = 1
+train_config.training.early_stopping_patience = 100
+train_config.training.latent_noise_scale = 0.1
+
+device = torch.device('cpu')
+train_loader, val_loader, test_loader, class_names = create_dataloaders(train_config)
+trainer = DGDTrainer(config=train_config, device=device, verbose=False)
+trainer.train(train_loader, val_loader, sample_data=None, class_names=class_names)
+
+# 2. Mirror the inference notebook's OWN cell 2 exactly: a fresh
+# hydra.compose() (a separate process/notebook from training, so a fresh
+# config object -- not train_config above), run-discovery, and the
+# open_dict()-guarded models_dir assignment. hydra.compose() -- unlike
+# OmegaConf.load() -- produces a struct-mode config, so this is the only
+# way to actually exercise the open_dict() requirement the real notebook
+# cell depends on.
+with initialize(version_base=None, config_path='config'):
+    config = compose(config_name='config')
 config.data.total_subset_fraction = 0.02
 config.data.download = False
 config.experiment_name = 'plan_smoke_full_inference'
-experiments_dir = Path('/tmp/plan_smoke_experiments_full_inference')
-timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-run_dir = experiments_dir / f'{timestamp}_{config.experiment_name}'
-run_dir.mkdir(parents=True, exist_ok=True)
-config.paths.models_dir = str(run_dir / 'models')
-config.paths.figures_dir = str(run_dir / 'figures')
-OmegaConf.save(config, str(run_dir / 'config.yaml'))
-
-config.training.epochs = 2
-config.training.first_epoch_gmm = 1
-config.training.refit_gmm_interval = 1
-config.training.early_stopping_patience = 100
-config.training.latent_noise_scale = 0.1
+config.paths.experiments_dir = str(experiments_dir)
 config.training.inference.epochs = 5
 config.training.inference.prior_warmup_steps = 0
 config.training.inference.latent_noise_scale = 0.2
 config.training.inference.latent_noise_start = 1.0
 config.training.inference.latent_noise_end = 0.01
 
-device = torch.device('cpu')
-train_loader, val_loader, test_loader, class_names = create_dataloaders(config)
-trainer = DGDTrainer(config=config, device=device, verbose=False)
-trainer.train(train_loader, val_loader, sample_data=None, class_names=class_names)
-
-# 2. Mirror the notebook's run-discovery logic.
 candidates = sorted(
     p for p in experiments_dir.glob(f'*_{config.experiment_name}')
     if (p / 'models' / 'best').is_dir()
@@ -1928,6 +1966,9 @@ candidates = sorted(
 assert candidates
 discovered_run_dir = candidates[-1]
 assert discovered_run_dir == run_dir
+
+with open_dict(config):
+    config.paths.models_dir = str(discovered_run_dir / 'models')
 
 trained_cfg = OmegaConf.load(discovered_run_dir / 'config.yaml')
 assert config.random_seed == trained_cfg.random_seed
