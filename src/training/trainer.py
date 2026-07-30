@@ -57,10 +57,8 @@ class DGDTrainer:
         self.momentum_betas = []  # Track beta_1 (momentum) values
 
         # Clustering metrics tracking
-        self.ari_scores = []
-        self.val_ari_scores = []
-        self.silhouette_scores = []
-        self.val_silhouette_scores = []
+        self.nmi_scores = []
+        self.val_nmi_scores = []
 
         # Best loss tracking
         self.best_train_loss = float('inf')
@@ -304,28 +302,6 @@ class DGDTrainer:
 
         return schedulers
 
-    def _safe_silhouette_score(
-        self,
-        cluster_metrics: ClusteringMetrics,
-        representations: torch.Tensor,
-        labels: torch.Tensor,
-        n_components: int
-    ) -> float:
-        """Compute silhouette score, subsampling large sets to bound GPU memory use.
-
-        ClusteringMetrics.silhouette_score materializes a full (N, N) pairwise
-        distance matrix, which OOMs once N reaches the tens of thousands. Subsampling
-        keeps memory bounded while still giving a representative score, mirroring
-        sklearn's silhouette_score `sample_size` parameter.
-        """
-        max_samples = getattr(self.training_config, 'silhouette_max_samples', 5000)
-        n_samples = representations.size(0)
-        if n_samples > max_samples:
-            idx = torch.randperm(n_samples, device=representations.device)[:max_samples]
-            representations = representations[idx]
-            labels = labels[idx]
-        return cluster_metrics.silhouette_score(representations, labels, n_components)
-
     def train(self, train_loader, val_loader, sample_data, class_names) -> Dict[str, Any]:
         """
         Main training loop.
@@ -410,10 +386,8 @@ class DGDTrainer:
 
             # Initialize clustering metrics calculator
             cluster_metrics = ClusteringMetrics()
-            current_train_ari = 0.0
-            current_val_ari = 0.0
-            current_train_silhouette = 0.0
-            current_val_silhouette = 0.0
+            current_train_nmi = 0.0
+            current_val_nmi = 0.0
 
             is_gmm_refit_epoch = epoch == first_epoch_gmm or (refit_gmm_interval and epoch % refit_gmm_interval == 0)
 
@@ -422,24 +396,16 @@ class DGDTrainer:
                     representations = rep.z.detach()
                     gmm.fit(representations, max_iter=1000 if epoch == first_epoch_gmm else 100)
 
-                    # Calculate ARI for training data
+                    # Calculate NMI for training data
                     predicted_labels = gmm.predict(representations)
-                    current_train_ari = cluster_metrics.adjusted_rand_score(train_labels, predicted_labels)
-                    self.ari_scores.append(current_train_ari)
+                    current_train_nmi = cluster_metrics.normalized_mutual_info_score(train_labels, predicted_labels)
+                    self.nmi_scores.append(current_train_nmi)
 
-                    # Calculate Silhouette Score for training data
-                    current_train_silhouette = self._safe_silhouette_score(cluster_metrics, representations, predicted_labels, gmm.n_components)
-                    self.silhouette_scores.append(current_train_silhouette)
-
-                    # Calculate ARI for val data
+                    # Calculate NMI for val data
                     val_representations = val_rep.z.detach()
                     val_predicted_labels = gmm.predict(val_representations)
-                    current_val_ari = cluster_metrics.adjusted_rand_score(val_labels, val_predicted_labels)
-                    self.val_ari_scores.append(current_val_ari)
-
-                    # Calculate Silhouette Score for val data
-                    current_val_silhouette = self._safe_silhouette_score(cluster_metrics, val_representations, val_predicted_labels, gmm.n_components)
-                    self.val_silhouette_scores.append(current_val_silhouette)
+                    current_val_nmi = cluster_metrics.normalized_mutual_info_score(val_labels, val_predicted_labels)
+                    self.val_nmi_scores.append(current_val_nmi)
 
                 # Persist a checkpoint at every GMM-refit epoch
                 save_checkpoint(
@@ -447,10 +413,8 @@ class DGDTrainer:
                     model.decoder, rep, val_rep, gmm,
                     metadata={
                         'epoch': epoch,
-                        'train_ari': current_train_ari,
-                        'val_ari': current_val_ari,
-                        'train_silhouette': current_train_silhouette,
-                        'val_silhouette': current_val_silhouette,
+                        'train_nmi': current_train_nmi,
+                        'val_nmi': current_val_nmi,
                     }
                 )
 
@@ -465,24 +429,16 @@ class DGDTrainer:
                     representations = rep.z.detach()
                     gmm.fit(representations, max_iter=100, warm_start=True)
 
-                    # Calculate ARI for training data
+                    # Calculate NMI for training data
                     predicted_labels = gmm.predict(representations)
-                    current_train_ari = cluster_metrics.adjusted_rand_score(train_labels, predicted_labels)
-                    self.ari_scores.append(current_train_ari)
+                    current_train_nmi = cluster_metrics.normalized_mutual_info_score(train_labels, predicted_labels)
+                    self.nmi_scores.append(current_train_nmi)
 
-                    # Calculate Silhouette Score for training data
-                    current_train_silhouette = self._safe_silhouette_score(cluster_metrics, representations, predicted_labels, gmm.n_components)
-                    self.silhouette_scores.append(current_train_silhouette)
-
-                    # Calculate ARI for val data
+                    # Calculate NMI for val data
                     val_representations = val_rep.z.detach()
                     val_predicted_labels = gmm.predict(val_representations)
-                    current_val_ari = cluster_metrics.adjusted_rand_score(val_labels, val_predicted_labels)
-                    self.val_ari_scores.append(current_val_ari)
-
-                    # Calculate Silhouette Score for val data
-                    current_val_silhouette = self._safe_silhouette_score(cluster_metrics, val_representations, val_predicted_labels, gmm.n_components)
-                    self.val_silhouette_scores.append(current_val_silhouette)
+                    current_val_nmi = cluster_metrics.normalized_mutual_info_score(val_labels, val_predicted_labels)
+                    self.val_nmi_scores.append(current_val_nmi)
 
             # Training phase
             model.decoder.train()
@@ -660,12 +616,12 @@ class DGDTrainer:
             # Format GMM losses for display
             gmm_train_str = f"{gmm_train_loss:.4f} (B: {self.best_gmm_train:.4f})" if epoch >= first_epoch_gmm else "0.0000"
             gmm_val_str = f"{gmm_val_loss:.4f} (B: {self.best_gmm_val:.4f})" if epoch >= first_epoch_gmm else "0.0000"
-            train_ari_str = f", ARI={current_train_ari:.4f}, Sil={current_train_silhouette:.4f}" if epoch >= first_epoch_gmm else ""
-            val_ari_str = f", ARI={current_val_ari:.4f}, Sil={current_val_silhouette:.4f}" if epoch >= first_epoch_gmm else ""
+            train_nmi_str = f", NMI={current_train_nmi:.4f}" if epoch >= first_epoch_gmm else ""
+            val_nmi_str = f", NMI={current_val_nmi:.4f}" if epoch >= first_epoch_gmm else ""
 
             print(f"Epoch {epoch}/{self.training_config.epochs} [Time per Epoch: {epoch_time_str}, Remaining Time: {remaining_time_str}, LR: Dec={lr_decoder:.2e}, Rep={lr_rep:.2e}, Noise={noise_scale:.4f}]")
-            print(f"       - Train Loss: {train_loss:.4f} (B: {self.best_train_loss:.4f}), Recon: {recon_train_loss:.4f} (B: {self.best_recon_train:.4f}), GMM: {gmm_train_str}{train_ari_str}")
-            print(f"       - Val   Loss: {val_loss:.4f} (B: {self.best_val_loss:.4f}), Recon: {recon_val_loss:.4f} (B: {self.best_recon_val:.4f}), GMM: {gmm_val_str}{val_ari_str}")
+            print(f"       - Train Loss: {train_loss:.4f} (B: {self.best_train_loss:.4f}), Recon: {recon_train_loss:.4f} (B: {self.best_recon_train:.4f}), GMM: {gmm_train_str}{train_nmi_str}")
+            print(f"       - Val   Loss: {val_loss:.4f} (B: {self.best_val_loss:.4f}), Recon: {recon_val_loss:.4f} (B: {self.best_recon_val:.4f}), GMM: {gmm_val_str}{val_nmi_str}")
 
             # Check for early stopping (only if active)
             early_stopping_patience = getattr(self.training_config, 'early_stopping_patience', None)
@@ -677,10 +633,15 @@ class DGDTrainer:
                 break
 
         # Persist the final-epoch state (whether training completed or stopped early)
+        final_metadata = {'epoch': epoch}
+        if epoch >= first_epoch_gmm:
+            final_metadata.update({'train_nmi': current_train_nmi, 'val_nmi': current_val_nmi})
+        else:
+            final_metadata.update({'train_loss': self.train_losses[-1], 'val_loss': self.val_losses[-1]})
         save_checkpoint(
             checkpoint_root / f"epoch_{epoch:04d}",
             model.decoder, rep, val_rep, gmm,
-            metadata={'epoch': epoch, 'train_loss': self.train_losses[-1], 'val_loss': self.val_losses[-1]}
+            metadata=final_metadata
         )
 
         # Restore best model checkpoint
@@ -725,10 +686,8 @@ class DGDTrainer:
             'recon_val_losses': self.recon_val_losses,
             'gmm_train_losses': self.gmm_train_losses,
             'gmm_val_losses': self.gmm_val_losses,
-            'ari_scores': self.ari_scores,
-            'val_ari_scores': self.val_ari_scores,
-            'silhouette_scores': self.silhouette_scores,
-            'val_silhouette_scores': self.val_silhouette_scores,
+            'nmi_scores': self.nmi_scores,
+            'val_nmi_scores': self.val_nmi_scores,
             'learning_rates': self.learning_rates,
             'momentum_betas': self.momentum_betas,
             'epoch_times': self.epoch_times,
