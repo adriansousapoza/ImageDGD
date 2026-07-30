@@ -97,7 +97,12 @@ def generate_training_figures(
     device = device or torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
     best_dir = experiment_dir / "best"
-    config = OmegaConf.load(best_dir / "config.yaml")
+    # The config.yaml copy for a run lives at the run folder's root (one
+    # level above experiment_dir, which is that run's models/ subfolder),
+    # not inside best/ -- written once by the calling notebook when the run
+    # folder is created.
+    run_dir = experiment_dir.parent
+    config = OmegaConf.load(run_dir / "config.yaml")
     decoder_factory = _build_decoder_factory(config.model)
 
     # Loss curves and training dynamics, from the persisted history. Plotted
@@ -106,11 +111,12 @@ def generate_training_figures(
     # checkpoint directory during the walk.
     history = torch.load(best_dir / "training_results.pth", map_location="cpu")
 
-    # Guard against pre-NMI-swap checkpoints (which have ari_scores/silhouette_scores)
-    if 'nmi_scores' not in history:
+    # Guard against pre-AMI/ARI-swap checkpoints (which have nmi_scores, or
+    # even older ari_scores/silhouette_scores)
+    if 'ami_scores' not in history:
         raise ValueError(
-            f"{best_dir / 'training_results.pth'} predates the NMI metric swap "
-            "(has ari_scores/silhouette_scores instead). Re-run training to regenerate it."
+            f"{best_dir / 'training_results.pth'} predates the AMI+ARI metric swap "
+            "(missing ami_scores). Re-run training to regenerate it."
         )
 
     trainer_view = SimpleNamespace(
@@ -118,8 +124,10 @@ def generate_training_figures(
         recon_val_losses=history['recon_val_losses'],
         gmm_train_losses=history['gmm_train_losses'],
         gmm_val_losses=history['gmm_val_losses'],
-        nmi_scores=history['nmi_scores'],
-        val_nmi_scores=history['val_nmi_scores'],
+        ami_scores=history['ami_scores'],
+        val_ami_scores=history['val_ami_scores'],
+        ari_scores=history['ari_scores'],
+        val_ari_scores=history['val_ari_scores'],
         learning_rates=history['learning_rates'],
         momentum_betas=history['momentum_betas'],
         epoch_times=history['epoch_times'],
