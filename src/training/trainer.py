@@ -57,8 +57,10 @@ class DGDTrainer:
         self.momentum_betas = []  # Track beta_1 (momentum) values
 
         # Clustering metrics tracking
-        self.nmi_scores = []
-        self.val_nmi_scores = []
+        self.ami_scores = []
+        self.val_ami_scores = []
+        self.ari_scores = []
+        self.val_ari_scores = []
 
         # Best loss tracking
         self.best_train_loss = float('inf')
@@ -386,8 +388,10 @@ class DGDTrainer:
 
             # Initialize clustering metrics calculator
             cluster_metrics = ClusteringMetrics()
-            current_train_nmi = 0.0
-            current_val_nmi = 0.0
+            current_train_ami = 0.0
+            current_val_ami = 0.0
+            current_train_ari = 0.0
+            current_val_ari = 0.0
 
             is_gmm_refit_epoch = epoch == first_epoch_gmm or (refit_gmm_interval and epoch % refit_gmm_interval == 0)
 
@@ -396,16 +400,20 @@ class DGDTrainer:
                     representations = rep.z.detach()
                     gmm.fit(representations, max_iter=1000 if epoch == first_epoch_gmm else 100)
 
-                    # Calculate NMI for training data
+                    # Calculate AMI and ARI for training data
                     predicted_labels = gmm.predict(representations)
-                    current_train_nmi = cluster_metrics.normalized_mutual_info_score(train_labels, predicted_labels)
-                    self.nmi_scores.append(current_train_nmi)
+                    current_train_ami = cluster_metrics.adjusted_mutual_info_score(train_labels, predicted_labels)
+                    self.ami_scores.append(current_train_ami)
+                    current_train_ari = cluster_metrics.adjusted_rand_score(train_labels, predicted_labels)
+                    self.ari_scores.append(current_train_ari)
 
-                    # Calculate NMI for val data
+                    # Calculate AMI and ARI for val data
                     val_representations = val_rep.z.detach()
                     val_predicted_labels = gmm.predict(val_representations)
-                    current_val_nmi = cluster_metrics.normalized_mutual_info_score(val_labels, val_predicted_labels)
-                    self.val_nmi_scores.append(current_val_nmi)
+                    current_val_ami = cluster_metrics.adjusted_mutual_info_score(val_labels, val_predicted_labels)
+                    self.val_ami_scores.append(current_val_ami)
+                    current_val_ari = cluster_metrics.adjusted_rand_score(val_labels, val_predicted_labels)
+                    self.val_ari_scores.append(current_val_ari)
 
                 # Persist a checkpoint at every GMM-refit epoch
                 save_checkpoint(
@@ -413,8 +421,10 @@ class DGDTrainer:
                     model.decoder, rep, val_rep, gmm,
                     metadata={
                         'epoch': epoch,
-                        'train_nmi': current_train_nmi,
-                        'val_nmi': current_val_nmi,
+                        'train_ami': current_train_ami,
+                        'val_ami': current_val_ami,
+                        'train_ari': current_train_ari,
+                        'val_ari': current_val_ari,
                     }
                 )
 
@@ -429,16 +439,20 @@ class DGDTrainer:
                     representations = rep.z.detach()
                     gmm.fit(representations, max_iter=100, warm_start=True)
 
-                    # Calculate NMI for training data
+                    # Calculate AMI and ARI for training data
                     predicted_labels = gmm.predict(representations)
-                    current_train_nmi = cluster_metrics.normalized_mutual_info_score(train_labels, predicted_labels)
-                    self.nmi_scores.append(current_train_nmi)
+                    current_train_ami = cluster_metrics.adjusted_mutual_info_score(train_labels, predicted_labels)
+                    self.ami_scores.append(current_train_ami)
+                    current_train_ari = cluster_metrics.adjusted_rand_score(train_labels, predicted_labels)
+                    self.ari_scores.append(current_train_ari)
 
-                    # Calculate NMI for val data
+                    # Calculate AMI and ARI for val data
                     val_representations = val_rep.z.detach()
                     val_predicted_labels = gmm.predict(val_representations)
-                    current_val_nmi = cluster_metrics.normalized_mutual_info_score(val_labels, val_predicted_labels)
-                    self.val_nmi_scores.append(current_val_nmi)
+                    current_val_ami = cluster_metrics.adjusted_mutual_info_score(val_labels, val_predicted_labels)
+                    self.val_ami_scores.append(current_val_ami)
+                    current_val_ari = cluster_metrics.adjusted_rand_score(val_labels, val_predicted_labels)
+                    self.val_ari_scores.append(current_val_ari)
 
             # Training phase
             model.decoder.train()
@@ -616,12 +630,12 @@ class DGDTrainer:
             # Format GMM losses for display
             gmm_train_str = f"{gmm_train_loss:.4f} (B: {self.best_gmm_train:.4f})" if epoch >= first_epoch_gmm else "0.0000"
             gmm_val_str = f"{gmm_val_loss:.4f} (B: {self.best_gmm_val:.4f})" if epoch >= first_epoch_gmm else "0.0000"
-            train_nmi_str = f", NMI={current_train_nmi:.4f}" if epoch >= first_epoch_gmm else ""
-            val_nmi_str = f", NMI={current_val_nmi:.4f}" if epoch >= first_epoch_gmm else ""
+            train_ami_ari_str = f", AMI={current_train_ami:.4f}, ARI={current_train_ari:.4f}" if epoch >= first_epoch_gmm else ""
+            val_ami_ari_str = f", AMI={current_val_ami:.4f}, ARI={current_val_ari:.4f}" if epoch >= first_epoch_gmm else ""
 
             print(f"Epoch {epoch}/{self.training_config.epochs} [Time per Epoch: {epoch_time_str}, Remaining Time: {remaining_time_str}, LR: Dec={lr_decoder:.2e}, Rep={lr_rep:.2e}, Noise={noise_scale:.4f}]")
-            print(f"       - Train Loss: {train_loss:.4f} (B: {self.best_train_loss:.4f}), Recon: {recon_train_loss:.4f} (B: {self.best_recon_train:.4f}), GMM: {gmm_train_str}{train_nmi_str}")
-            print(f"       - Val   Loss: {val_loss:.4f} (B: {self.best_val_loss:.4f}), Recon: {recon_val_loss:.4f} (B: {self.best_recon_val:.4f}), GMM: {gmm_val_str}{val_nmi_str}")
+            print(f"       - Train Loss: {train_loss:.4f} (B: {self.best_train_loss:.4f}), Recon: {recon_train_loss:.4f} (B: {self.best_recon_train:.4f}), GMM: {gmm_train_str}{train_ami_ari_str}")
+            print(f"       - Val   Loss: {val_loss:.4f} (B: {self.best_val_loss:.4f}), Recon: {recon_val_loss:.4f} (B: {self.best_recon_val:.4f}), GMM: {gmm_val_str}{val_ami_ari_str}")
 
             # Check for early stopping (only if active)
             early_stopping_patience = getattr(self.training_config, 'early_stopping_patience', None)
@@ -636,7 +650,15 @@ class DGDTrainer:
         save_checkpoint(
             checkpoint_root / f"epoch_{epoch:04d}",
             model.decoder, rep, val_rep, gmm,
-            metadata={'epoch': epoch, 'train_loss': self.train_losses[-1], 'val_loss': self.val_losses[-1]}
+            metadata={
+                'epoch': epoch,
+                'train_ami': current_train_ami,
+                'val_ami': current_val_ami,
+                'train_ari': current_train_ari,
+                'val_ari': current_val_ari,
+                'train_loss': self.train_losses[-1],
+                'val_loss': self.val_losses[-1]
+            }
         )
 
         # Restore best model checkpoint
@@ -681,8 +703,10 @@ class DGDTrainer:
             'recon_val_losses': self.recon_val_losses,
             'gmm_train_losses': self.gmm_train_losses,
             'gmm_val_losses': self.gmm_val_losses,
-            'nmi_scores': self.nmi_scores,
-            'val_nmi_scores': self.val_nmi_scores,
+            'ami_scores': self.ami_scores,
+            'val_ami_scores': self.val_ami_scores,
+            'ari_scores': self.ari_scores,
+            'val_ari_scores': self.val_ari_scores,
             'learning_rates': self.learning_rates,
             'momentum_betas': self.momentum_betas,
             'epoch_times': self.epoch_times,
