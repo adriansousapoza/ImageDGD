@@ -105,6 +105,14 @@ def generate_training_figures(
     # survive even if load_checkpoint raises partway through a malformed
     # checkpoint directory during the walk.
     history = torch.load(best_dir / "training_results.pth", map_location="cpu")
+
+    # Guard against pre-NMI-swap checkpoints (which have ari_scores/silhouette_scores)
+    if 'nmi_scores' not in history:
+        raise ValueError(
+            f"{best_dir / 'training_results.pth'} predates the NMI metric swap "
+            "(has ari_scores/silhouette_scores instead). Re-run training to regenerate it."
+        )
+
     trainer_view = SimpleNamespace(
         recon_train_losses=history['recon_train_losses'],
         recon_val_losses=history['recon_val_losses'],
