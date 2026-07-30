@@ -633,15 +633,10 @@ class DGDTrainer:
                 break
 
         # Persist the final-epoch state (whether training completed or stopped early)
-        final_metadata = {'epoch': epoch}
-        if epoch >= first_epoch_gmm:
-            final_metadata.update({'train_nmi': current_train_nmi, 'val_nmi': current_val_nmi})
-        else:
-            final_metadata.update({'train_loss': self.train_losses[-1], 'val_loss': self.val_losses[-1]})
         save_checkpoint(
             checkpoint_root / f"epoch_{epoch:04d}",
             model.decoder, rep, val_rep, gmm,
-            metadata=final_metadata
+            metadata={'epoch': epoch, 'train_loss': self.train_losses[-1], 'val_loss': self.val_losses[-1]}
         )
 
         # Restore best model checkpoint
