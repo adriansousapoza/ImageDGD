@@ -167,7 +167,7 @@ labels = torch.randint(0, 5, (2000,))
 plot_latent_space(representations=representations, labels=labels, save_path='/tmp/plan_smoke_latent_tsne.png', show=False)
 print("DONE")
 PYEOF
-/home/asp/.venvs/rapids_cu13/bin/python /tmp/plan_smoke_tsne_check.py > /tmp/plan_smoke_tsne_output.txt 2>&1
+PYTHONPATH=/home/asp/Downloads/HeaDS/ImageDGD /home/asp/.venvs/rapids_cu13/bin/python /tmp/plan_smoke_tsne_check.py > /tmp/plan_smoke_tsne_output.txt 2>&1
 cat /tmp/plan_smoke_tsne_output.txt
 grep -qi "nearest neighbors" /tmp/plan_smoke_tsne_output.txt && echo "FAIL: warning still present" || echo "OK: no nearest-neighbors warning"
 grep -q "DONE" /tmp/plan_smoke_tsne_output.txt && echo "OK: completed without error"
