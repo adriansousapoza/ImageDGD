@@ -511,7 +511,20 @@ config.experiment_name = 'plan_smoke_ami_ari'
 config.paths.models_dir = '/tmp/plan_smoke_models_ami_ari'
 config.training.epochs = 3
 config.training.first_epoch_gmm = 1
-config.training.refit_gmm_interval = 1
+# Larger than epochs, so the only refit-checkpoint epoch is epoch 1 (via the
+# epoch == first_epoch_gmm match). This deliberately keeps the final epoch
+# (3) from ALSO being a refit-checkpoint epoch: save_checkpoint does a plain
+# torch.save with no merge, so if the final epoch coincided with a refit
+# checkpoint, the unconditional loss-only final-epoch save (below, after the
+# training loop) would silently overwrite that epoch's AMI/ARI metadata with
+# {'epoch', 'train_loss', 'val_loss'} only -- a pre-existing, out-of-scope
+# bug in the final-checkpoint save that predates this task and is not this
+# task's to fix (same behavior existed for ari/silhouette, and then nmi,
+# before this plan). Avoiding the collision here, rather than reading around
+# it, keeps this verification meaningful without tempting an implementer to
+# "fix" the collision by touching the final-checkpoint save -- which is
+# exactly the out-of-scope edit this task must NOT make.
+config.training.refit_gmm_interval = 5
 config.training.early_stopping_patience = 100
 config.training.latent_noise_scale = 0.0
 
@@ -537,11 +550,20 @@ for key in ['ami_scores', 'val_ami_scores', 'ari_scores', 'val_ari_scores']:
     assert key in history and len(history[key]) == 3, f'{key} missing or wrong length'
 assert 'nmi_scores' not in history
 
-checkpoint_dirs = sorted((run_experiment_dir / 'checkpoints').glob('epoch_*'))
-last_meta = torch.load(checkpoint_dirs[-1] / 'metadata.pth')
+# Read the epoch-1 checkpoint specifically (the only refit-checkpoint
+# epoch under this config) rather than the final checkpoint -- the final
+# checkpoint (epoch_0003) is written by the loss-only final-epoch save and,
+# by design of trainer.py (not this task's concern), never carries AMI/ARI
+# metadata.
+refit_meta = torch.load(run_experiment_dir / 'checkpoints' / 'epoch_0001' / 'metadata.pth')
 for key in ['train_ami', 'val_ami', 'train_ari', 'val_ari']:
-    assert key in last_meta, f'checkpoint metadata missing {key}'
-print('OK: AMI+ARI schema present, NMI gone, list lengths correct')
+    assert key in refit_meta, f'checkpoint metadata missing {key}'
+final_meta = torch.load(run_experiment_dir / 'checkpoints' / 'epoch_0003' / 'metadata.pth')
+assert 'train_ami' not in final_meta and 'val_ami' not in final_meta and 'train_ari' not in final_meta and 'val_ari' not in final_meta, (
+    'final-epoch checkpoint metadata must stay loss-only ({epoch, train_loss, val_loss}) -- '
+    'if AMI/ARI keys appear here, the final-checkpoint save in trainer.py was touched, which is out of scope for this task'
+)
+print('OK: AMI+ARI schema present, NMI gone, list lengths correct, final-checkpoint save untouched')
 "
 ```
 Expected: `OK: ...`.
