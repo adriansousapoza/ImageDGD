@@ -1633,7 +1633,10 @@ nb["cells"][1]["outputs"] = []
 # of a fixed path. ---
 old_config_cell = "".join(nb["cells"][2]["source"])
 assert "trained_cfg = OmegaConf.load(Path(config.paths.models_dir) / config.experiment_name" in old_config_cell, "cell 2 source has changed unexpectedly"
-new_config_cell = '''config.data.root_dir = str(project_root / "data")
+new_config_cell = '''with initialize(version_base=None, config_path="../config"):
+    config = compose(config_name="config")
+
+config.data.root_dir = str(project_root / "data")
 config.paths.experiments_dir = str(project_root / "experiments")
 
 experiments_dir = Path(config.paths.experiments_dir)
