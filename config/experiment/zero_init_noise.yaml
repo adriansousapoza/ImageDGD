@@ -1,0 +1,18 @@
+# Experiment: representations initialised at exactly zero, with noise
+# injection on (the original DGD protocol). Pairs with
+# normal_init_no_noise.yaml -- see that file's header for the equivalence
+# argument. latent_noise_start/end pinned explicitly (even though they match
+# config.yaml's current defaults) so the pairing stays valid even if the
+# base config's noise schedule changes later.
+experiment_name: "ImageDGD_ZeroInitNoise"
+description: "Representations initialised at zero; noise injection enabled (original protocol)"
+
+model:
+  representation:
+    distribution: "zeros"
+    dist_params: {}
+
+training:
+  latent_noise_enabled: true
+  latent_noise_start: 1.0
+  latent_noise_end: 0.01

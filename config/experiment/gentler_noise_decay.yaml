@@ -1,0 +1,8 @@
+# Experiment: gentler noise decay -- noise anneals only 10x (1.0 -> 0.1)
+# instead of the default 100x (1.0 -> 0.01), so noise stays larger for
+# longer and settles on a less-decayed level by the final epoch.
+experiment_name: "ImageDGD_GentlerNoiseDecay"
+description: "Noise decays only 10x (1.0 -> 0.1) instead of the default 100x (1.0 -> 0.01)"
+
+training:
+  latent_noise_end: 0.1

@@ -1,0 +1,9 @@
+# Experiment: higher starting noise -- anneals from 10.0 down to the
+# default end value 0.01, a 1000x decay instead of the default 100x
+# (1.0 -> 0.01). Noise dominates much more strongly early in training.
+experiment_name: "ImageDGD_HigherNoiseStart"
+description: "Noise starts at 10.0 instead of the default 1.0, still ending at 0.01 (1000x decay instead of 100x)"
+
+training:
+  latent_noise_start: 10.0
+  latent_noise_end: 0.01

@@ -24,7 +24,6 @@ data:
   total_subset_fraction: 1.0
   val_split: 0.1
   test_split: 0.1
-  normalize: true
   download: true
   shuffle_train: true
   shuffle_val: false
@@ -54,8 +53,8 @@ model:
   # Representation layer configuration
   representation:
     n_features: 8
-    distribution: "uniform_ball"  # Options: normal, uniform, uniform_ball, uniform_sphere, laplace, student_t, logistic, hyperbolic, zeros, pca
-    dist_params: {'radius': 1.0}
+    distribution: "zeros"  # Options: normal, uniform, uniform_ball, uniform_sphere, laplace, student_t, logistic, hyperbolic, zeros, pca
+    dist_params: {}
     # Distribution-specific parameters examples:
     # {'radius': 1.0} # uniform_ball
     # {'radius': 1.0} # uniform_sphere
@@ -70,7 +69,7 @@ model:
   
   # Decoder configuration
   decoder:
-    hidden_dims: [32, 16] 
+    hidden_dims: [128, 64]
     output_channels: 1
     output_size: [28, 28]
     init_size: [7, 7]
@@ -111,14 +110,22 @@ training:
   epochs: 200
   device: "auto"
   
-  # Early stopping
-  early_stopping_patience: 10
+  # Early stopping. Active from first_epoch_gmm onward; the GMM prior
+  # introduces per-refit val-loss noise (observed ~30-epoch oscillations
+  # around refit points), so patience needs enough margin to not mistake
+  # that noise for a genuine plateau.
+  early_stopping_patience: null
   
   # GMM training schedule
-  first_epoch_gmm: 0
-  refit_gmm_interval: 10
+  first_epoch_gmm: 50
+  refit_gmm_interval: 50
   lambda_gmm: 1.0
-  final_gmm_fit: true
+  final_gmm_fit: false
+
+  # Latent space noise injection (regularization)
+  latent_noise_enabled: true  # Enable noise injection
+  latent_noise_start: 1.0  # Starting noise scale (epoch 1)
+  latent_noise_end: 0.01     # Ending noise scale (final epoch)
 
   # Post-hoc inference (Algorithm 2): optimizing representations for the
   # held-out test split against a frozen decoder + GMM. M0 (prior_warmup_steps)
@@ -126,19 +133,17 @@ training:
   # gradient before reconstruction has informed it where to go; a short
   # reconstruction-only warm-up lets it find its basin first.
   inference:
-    epochs: 200            # M: total optimization steps
-    prior_warmup_steps: 0 # M0: steps before the GMM prior term is added
-    # Independent of the top-level latent_noise_scale/_start/_end above --
-    # inference noise can be tuned without touching training's config.
-    latent_noise_scale: 0.1   # Enable noise injection (0.0 = disabled)
-    latent_noise_start: 1.0  # Starting noise scale (step 1)
-    latent_noise_end: 0.01     # Ending noise scale (final step M)
+    epochs: 400            # M: total optimization steps
+    prior_warmup_steps: ${training.first_epoch_gmm} # M0: steps before the GMM prior term is added
+    # Mirrors the top-level latent_noise_enabled/_start/_end above via
+    # OmegaConf interpolation, so inference uses the exact same noise
+    # settings training did by default. Override any of these three lines
+    # with a literal value to make inference's noise independently tunable
+    # again -- interpolation only applies while the field is left as ${...}.
+    latent_noise_enabled: ${training.latent_noise_enabled}  # Enable noise injection
+    latent_noise_start: ${training.latent_noise_start}  # Starting noise scale (step 1)
+    latent_noise_end: ${training.latent_noise_end}     # Ending noise scale (final step M)
 
-  # Latent space noise injection (regularization)
-  latent_noise_scale: 0.1   # Enable noise injection (0.0 = disabled)
-  latent_noise_start: 1.0  # Starting noise scale (epoch 1)
-  latent_noise_end: 0.01     # Ending noise scale (final epoch)
-  
   # Optimizer configuration (AdamW)
   optimizer:
     decoder:
@@ -154,16 +159,11 @@ training:
       eps: 1e-8
       amsgrad: false
   
-  # Learning rate scheduler (OneCycleLR)
+  # Learning rate scheduler (cosine annealing, no warm-up/restarts: a plain
+  # decay from base_lr to final_lr over the full training run)
   lr_scheduler:
     enabled: true
-    max_lr_decoder: 0.01        # Max LR for decoder (if null, uses optimizer lr)
-    max_lr_representation: 0.1  # Max LR for representation (if null, uses optimizer lr)
-    pct_start: 0.25             # Percentage of cycle spent increasing LR
-    div_factor: 10.0            # Initial LR = max_lr / div_factor
-    final_div_factor: 1000.0    # Final LR = max_lr / final_div_factor
-    anneal_strategy: 'cos'      # 'cos' or 'linear'
-    cycle_momentum: true        # If true, momentum is cycled inversely to learning rate
-    base_momentum: 0.85         # Lower momentum bound (used when LR is at max)
-    max_momentum: 0.9           # Upper momentum bound (used when LR is at min)
-    three_phase: false          # If true, use a three phase schedule (increasing, constant, decreasing)
+    base_lr_decoder: 0.01          # Starting LR for decoder (if null, uses optimizer.decoder.lr)
+    final_lr_decoder: 0.001       # Ending LR for decoder
+    base_lr_representation: 0.1    # Starting LR for representations (if null, uses optimizer.representation.lr)
+    final_lr_representation: 0.01 # Ending LR for representations

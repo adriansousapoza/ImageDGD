@@ -1,6 +1,5 @@
 import torch
 import torch.nn as nn
-import numpy as np
 from typing import Optional, Dict, Union, List, Tuple, Any
 from torch import Tensor
 
@@ -38,8 +37,7 @@ class RepresentationLayer(nn.Module):
             explicitly specified (must match if both provided).
         values : torch.Tensor, optional
             Explicit representation values to use directly (e.g. when restoring a
-            saved layer via `load`, or seeding from a PCA projection via
-            `initialize_from_pca`). Takes precedence over `dist`/`dist_params`,
+            saved layer via `load`). Takes precedence over `dist`/`dist_params`,
             which are recorded as metadata but not used to resample.
         dist : str, default "normal"
             Distribution for sampling: "normal", "uniform", "laplace", "student_t", "uniform_ball", "uniform_sphere", "logistic", "hyperbolic", "zeros", "pca".
@@ -286,9 +284,11 @@ class RepresentationLayer(nn.Module):
         mean = options.get("mean", torch.zeros(self._dim))
         cov = options.get("cov", torch.eye(self._dim))
         
-        # Handle scalar mean (broadcast to vector)
+        # Handle scalar mean (broadcast to vector). float() avoids torch.full
+        # inferring an int64 dtype from a plain Python int (e.g. mean: 0 from
+        # YAML), which MultivariateNormal/_standard_normal can't sample from.
         if isinstance(mean, (int, float)):
-            mean = torch.full((self._dim,), mean)
+            mean = torch.full((self._dim,), float(mean))
         
         # Handle scalar covariance (create spherical covariance matrix)
         if isinstance(cov, (int, float)):
@@ -366,12 +366,13 @@ class RepresentationLayer(nn.Module):
         scale_matrix = options.get("scale_matrix", torch.eye(self._dim, device=self.device))
         rate = options.get("rate", 1.0)  # Rate parameter for exponential distribution
         
-        # Handle scalar location (broadcast to vector)
+        # Handle scalar location (broadcast to vector). float() avoids
+        # torch.full inferring an int64 dtype from a plain Python int.
         if isinstance(loc, (int, float)):
-            loc = torch.full((self._dim,), loc, device=self.device)
+            loc = torch.full((self._dim,), float(loc), device=self.device)
         else:
             loc = loc.to(self.device)
-            
+
         # Handle scalar scale_matrix (create spherical scale matrix)
         if isinstance(scale_matrix, (int, float)):
             scale_matrix = scale_matrix * torch.eye(self._dim, device=self.device)
@@ -420,15 +421,16 @@ class RepresentationLayer(nn.Module):
         loc = options.get("loc", torch.zeros(self._dim, device=self.device))
         scale = options.get("scale", torch.ones(self._dim, device=self.device))
         
-        # Handle scalar location (broadcast to vector)
+        # Handle scalar location (broadcast to vector). float() avoids
+        # torch.full inferring an int64 dtype from a plain Python int.
         if isinstance(loc, (int, float)):
-            loc = torch.full((self._dim,), loc, device=self.device)
+            loc = torch.full((self._dim,), float(loc), device=self.device)
         else:
             loc = loc.to(self.device)
-            
+
         # Handle scalar scale (broadcast to vector)
         if isinstance(scale, (int, float)):
-            scale = torch.full((self._dim,), scale, device=self.device)
+            scale = torch.full((self._dim,), float(scale), device=self.device)
         else:
             scale = scale.to(self.device)
         
@@ -483,9 +485,10 @@ class RepresentationLayer(nn.Module):
         beta = options.get("beta", 0.0)  
         delta = options.get("delta", 1.0)
         
-        # Handle scalar location (broadcast to vector)
+        # Handle scalar location (broadcast to vector). float() avoids
+        # torch.full inferring an int64 dtype from a plain Python int.
         if isinstance(mu, (int, float)):
-            mu = torch.full((self._dim,), mu, device=self.device)
+            mu = torch.full((self._dim,), float(mu), device=self.device)
         else:
             mu = mu.to(self.device)
         
@@ -657,26 +660,5 @@ class RepresentationLayer(nn.Module):
         else:
             dist_name = 'normal'
         
-        return cls(dim=dim, n_samples=n_samples, values=state_dict['z'], 
+        return cls(dim=dim, n_samples=n_samples, values=state_dict['z'],
                   dist=dist_name, dist_params=dist_params, device=device)
-    
-    @classmethod
-    def initialize_from_pca(cls, data: Tensor, n_components: Optional[int] = None, 
-                            device: Optional[Union[str, torch.device]] = None) -> 'RepresentationLayer':
-        """Initialize representations using PCA of input data."""
-        if not isinstance(data, torch.Tensor):
-            raise TypeError("Data must be a torch.Tensor")
-        
-        # Reshape to 2D if needed
-        if len(data.shape) > 2:
-            n_samples = data.shape[0]
-            data = data.reshape(n_samples, -1)
-        
-        device = device or data.device
-        n_components = n_components or min(data.shape)
-        
-        # Apply PCA
-        pca = TorchPCA(n_components=n_components)
-        transformed_data = pca.fit_transform(data)
-        
-        return cls(dim=transformed_data.shape[1], values=transformed_data, device=device)

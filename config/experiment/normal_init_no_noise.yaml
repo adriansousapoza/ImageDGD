@@ -1,0 +1,35 @@
+# Experiment: no noise injection, representations initialised from
+# N(0, cov=1) instead of zero.
+#
+# Equivalence argument: in zero_init_noise.yaml, z starts at 0 and gets
+# noise = randn_like(z) * noise_scale added at every forward pass. At epoch
+# 1, cosine_noise_schedule(step=1, ...) returns exactly `start` (progress=0
+# -> cos(0)=1, see src/utils/schedules.py), so the epoch-1 z used by the
+# decoder is 0 + randn(...)*1.0, i.e. z ~ N(0, 1). That's exactly what
+# _get_rep_from_normal produces when cov=1.0 (scalar cov is treated as the
+# per-dimension variance, so cov=1.0 <=> std=1). So this config reproduces
+# zero_init_noise's *first* effective z distribution as a one-shot init,
+# then trains with no further noise -- isolating "random non-zero start"
+# from "noise re-injected every epoch on a decaying schedule".
+#
+# cov here must stay equal to zero_init_noise.yaml's latent_noise_start for
+# the equivalence to hold -- if you change one, change both.
+#
+# Note: trainer.py currently reads distribution params (radius/mean/cov/...)
+# off flat `representation.<param>` attributes, not the nested `dist_params`
+# dict below -- so this dist_params is presently a no-op and
+# RepresentationLayer's own built-in default for "normal" (mean=0,
+# cov=identity, i.e. std=1) is what actually applies. That default happens
+# to equal what's written here, so behavior is correct either way; it's
+# spelled out explicitly so this file stays correct if that trainer.py
+# lookup bug is ever fixed to read dist_params properly.
+experiment_name: "ImageDGD_NormalInitNoNoise"
+description: "No noise injection; representations initialised from N(0, cov=1) (matches zero_init_noise's first-step noise scale)"
+
+model:
+  representation:
+    distribution: "normal"
+    dist_params: {mean: 0, cov: 1.0}
+
+training:
+  latent_noise_enabled: false

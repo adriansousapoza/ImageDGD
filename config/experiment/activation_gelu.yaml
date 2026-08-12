@@ -1,0 +1,12 @@
+# Experiment: GELU activation instead of the default leaky_relu.
+# GELU is smooth everywhere (no dead-unit failure mode like ReLU/LeakyReLU),
+# which tends to help decoders/generators specifically -- it's the default
+# activation in most modern generative architectures (diffusion U-Nets,
+# ViT-based generators). Already supported, no code change needed
+# (see self.activations in src/models/dgd.py).
+experiment_name: "ImageDGD_ActivationGELU"
+description: "GELU activation instead of the default leaky_relu"
+
+model:
+  decoder:
+    activation: "gelu"

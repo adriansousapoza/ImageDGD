@@ -1,0 +1,9 @@
+# Experiment: wider decoder.
+# Merged onto config/config.yaml's defaults by notebooks/run_experiments.ipynb
+# (OmegaConf.merge(base, this)) -- only the fields that differ need to be here.
+experiment_name: "ImageDGD_LargerDecoder"
+description: "Wider decoder: hidden_dims=[256, 128, 64] instead of the default [128, 64]"
+
+model:
+  decoder:
+    hidden_dims: [256, 128, 64]

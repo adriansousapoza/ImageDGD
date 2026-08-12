@@ -5,13 +5,10 @@ Training utilities and trainer class for ImageDGD.
 import torch
 import torch.nn.functional as F
 import time
-import math
 from datetime import timedelta
 from pathlib import Path
-from typing import Dict, List, Tuple, Optional, Any
-from omegaconf import DictConfig
-from tqdm import tqdm
-import numpy as np
+from typing import Dict, List, Tuple, Any
+from omegaconf import DictConfig, OmegaConf
 
 # Import tgmm package for Gaussian Mixture Model
 from tgmm import GaussianMixture, ClusteringMetrics
@@ -19,6 +16,7 @@ from tgmm import GaussianMixture, ClusteringMetrics
 from ..models import RepresentationLayer, DGD, ConvDecoder
 from ..data.dataloader import collect_all_labels
 from ..utils.checkpoint import save_checkpoint
+from ..utils.schedules import cosine_noise_schedule
 
 
 class DGDTrainer:
@@ -120,15 +118,15 @@ class DGDTrainer:
             dist_params['whiten'] = config_dist_params.get('whiten', False)
             dist_params['svd_solver'] = config_dist_params.get('svd_solver', 'auto')
         else:
-            # Handle standard distribution parameters
-            if hasattr(model_config.representation, 'radius'):
-                dist_params['radius'] = model_config.representation.radius
-
-            # Handle other potential distribution parameters
-            for param in ['mean', 'cov', 'low', 'high', 'loc', 'scale', 'scale_matrix',
-                         'rate', 'df', 'mu', 'alpha', 'beta', 'delta']:
-                if hasattr(model_config.representation, param):
-                    dist_params[param] = getattr(model_config.representation, param)
+            # Distribution-specific parameters (radius, mean, cov, low, high, ...)
+            # live nested under representation.dist_params in config, not as flat
+            # siblings of `distribution` -- read them from there so config.yaml's
+            # documented dist_params values (e.g. uniform_ball's radius) are
+            # actually applied instead of silently falling back to
+            # RepresentationLayer's own built-in defaults.
+            dist_params = OmegaConf.to_container(
+                model_config.representation.get('dist_params', {}), resolve=True
+            )
 
         rep = RepresentationLayer(
             dim=model_config.representation.n_features,
@@ -210,14 +208,24 @@ class DGDTrainer:
         return model, rep, val_rep, gmm
 
     def _create_optimizers(self, model, rep, val_rep) -> List:
-        """Create AdamW optimizers based on configuration."""
+        """Create AdamW optimizers based on configuration.
+
+        When the cosine lr_scheduler is enabled, its base_lr_* overrides the
+        optimizer's own lr at construction time -- CosineAnnealingLR has no
+        base_lr argument of its own, it reads its starting LR straight off
+        the optimizer, so this is the only place that value can be set.
+        """
         training_config = self.training_config
+        lr_config = training_config.lr_scheduler
 
         # Decoder optimizer (AdamW)
         decoder_config = training_config.optimizer.decoder
+        decoder_lr = decoder_config.lr
+        if lr_config.get('enabled', False) and lr_config.get('base_lr_decoder', None) is not None:
+            decoder_lr = lr_config.base_lr_decoder
         decoder_optimizer = torch.optim.AdamW(
             model.decoder.parameters(),
-            lr=decoder_config.lr,
+            lr=decoder_lr,
             betas=tuple(decoder_config.betas),
             eps=decoder_config.eps,
             weight_decay=decoder_config.weight_decay,
@@ -226,9 +234,12 @@ class DGDTrainer:
 
         # Representation optimizers (AdamW)
         rep_config = training_config.optimizer.representation
+        rep_lr = rep_config.lr
+        if lr_config.get('enabled', False) and lr_config.get('base_lr_representation', None) is not None:
+            rep_lr = lr_config.base_lr_representation
         trainrep_optimizer = torch.optim.AdamW(
             rep.parameters(),
-            lr=rep_config.lr,
+            lr=rep_lr,
             betas=tuple(rep_config.betas),
             eps=rep_config.eps,
             weight_decay=rep_config.weight_decay,
@@ -237,7 +248,7 @@ class DGDTrainer:
 
         valrep_optimizer = torch.optim.AdamW(
             val_rep.parameters(),
-            lr=rep_config.lr,
+            lr=rep_lr,
             betas=tuple(rep_config.betas),
             eps=rep_config.eps,
             weight_decay=rep_config.weight_decay,
@@ -247,7 +258,8 @@ class DGDTrainer:
         return [decoder_optimizer, trainrep_optimizer, valrep_optimizer]
 
     def _create_schedulers(self, optimizers, total_epochs: int, steps_per_epoch: int) -> List:
-        """Create learning rate schedulers using OneCycleLR.
+        """Create learning rate schedulers using plain cosine annealing
+        (base_lr -> final_lr, no warm-up, no momentum cycling).
 
         Note: Decoder steps per batch, representations step per epoch.
         Need different total_steps for each optimizer.
@@ -257,47 +269,20 @@ class DGDTrainer:
         if not lr_config.get('enabled', False):
             return [None, None, None]
 
-        # OneCycleLR parameters
-        pct_start = lr_config.get('pct_start', 0.3)
-        div_factor = lr_config.get('div_factor', 25.0)
-        final_div_factor = lr_config.get('final_div_factor', 10000.0)
-        anneal_strategy = lr_config.get('anneal_strategy', 'cos')
-        cycle_momentum = lr_config.get('cycle_momentum', True)
-        base_momentum = lr_config.get('base_momentum', 0.85)
-        max_momentum = lr_config.get('max_momentum', 0.95)
-        three_phase = lr_config.get('three_phase', False)
-
         schedulers = []
         for i, optimizer in enumerate(optimizers):
-            # Get max learning rate from scheduler config or optimizer
-            if i == 0:  # Decoder optimizer
-                max_lr = lr_config.get('max_lr_decoder', None)
-                if max_lr is None:
-                    max_lr = optimizer.param_groups[0]['lr']
-            else:  # Representation optimizers (trainrep and valrep)
-                max_lr = lr_config.get('max_lr_representation', None)
-                if max_lr is None:
-                    max_lr = optimizer.param_groups[0]['lr']
-
             # Decoder (index 0) steps per batch, representations (indices 1, 2) step per epoch
             if i == 0:  # Decoder optimizer
                 total_steps = total_epochs * steps_per_epoch
+                final_lr = lr_config.final_lr_decoder
             else:  # Representation optimizers (trainrep and valrep)
                 total_steps = total_epochs
+                final_lr = lr_config.final_lr_representation
 
-            # Create OneCycleLR scheduler
-            scheduler = torch.optim.lr_scheduler.OneCycleLR(
+            scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
                 optimizer,
-                max_lr=max_lr,
-                total_steps=total_steps,
-                pct_start=pct_start,
-                anneal_strategy=anneal_strategy,
-                div_factor=div_factor,
-                final_div_factor=final_div_factor,
-                cycle_momentum=cycle_momentum,
-                base_momentum=base_momentum,
-                max_momentum=max_momentum,
-                three_phase=three_phase
+                T_max=total_steps,
+                eta_min=final_lr,
             )
 
             schedulers.append(scheduler)
@@ -399,10 +384,14 @@ class DGDTrainer:
 
             is_gmm_refit_epoch = epoch == first_epoch_gmm or (refit_gmm_interval and epoch % refit_gmm_interval == 0)
 
-            if is_gmm_refit_epoch:
+            if is_gmm_refit_epoch or epoch > first_epoch_gmm:
                 with torch.no_grad():
                     representations = rep.z.detach()
-                    gmm.fit(representations, max_iter=1000 if epoch == first_epoch_gmm else 100)
+                    if is_gmm_refit_epoch:
+                        gmm.fit(representations, max_iter=1000 if epoch == first_epoch_gmm else 100)
+                    else:
+                        # Between refits: cheap warm-started update only.
+                        gmm.fit(representations, max_iter=100, warm_start=True)
 
                     # Calculate AMI and ARI for training data
                     predicted_labels = gmm.predict(representations)
@@ -419,6 +408,7 @@ class DGDTrainer:
                     current_val_ari = cluster_metrics.adjusted_rand_score(val_labels, val_predicted_labels)
                     self.val_ari_scores.append(current_val_ari)
 
+            if is_gmm_refit_epoch:
                 # Persist a checkpoint at every GMM-refit epoch
                 save_checkpoint(
                     checkpoint_root / f"epoch_{epoch:04d}",
@@ -438,41 +428,20 @@ class DGDTrainer:
                     self.best_train_loss = float('inf')  # Reset best loss
                     self.best_val_loss = float('inf')  # Reset val loss too (GMM adds error term)
                     self.epochs_without_improvement = 0
-            elif epoch > first_epoch_gmm:
-                with torch.no_grad():
-                    representations = rep.z.detach()
-                    gmm.fit(representations, max_iter=100, warm_start=True)
-
-                    # Calculate AMI and ARI for training data
-                    predicted_labels = gmm.predict(representations)
-                    current_train_ami = cluster_metrics.adjusted_mutual_info_score(train_labels, predicted_labels)
-                    self.ami_scores.append(current_train_ami)
-                    current_train_ari = cluster_metrics.adjusted_rand_score(train_labels, predicted_labels)
-                    self.ari_scores.append(current_train_ari)
-
-                    # Calculate AMI and ARI for val data
-                    val_representations = val_rep.z.detach()
-                    val_predicted_labels = gmm.predict(val_representations)
-                    current_val_ami = cluster_metrics.adjusted_mutual_info_score(val_labels, val_predicted_labels)
-                    self.val_ami_scores.append(current_val_ami)
-                    current_val_ari = cluster_metrics.adjusted_rand_score(val_labels, val_predicted_labels)
-                    self.val_ari_scores.append(current_val_ari)
 
             # Training phase
             model.decoder.train()
             trainrep_optimizer.zero_grad()
 
             # Calculate scheduled noise scale (cosine annealing from start to end)
-            if self.training_config.latent_noise_scale > 0:
+            if self.training_config.latent_noise_enabled:
                 noise_start = self.training_config.get('latent_noise_start', 1.0)
                 noise_end = self.training_config.get('latent_noise_end', 0.01)
-                progress = (epoch - 1) / max(self.training_config.epochs - 1, 1)
-                # Cosine annealing: starts at noise_start, smoothly decreases to noise_end
-                noise_scale = noise_end + (noise_start - noise_end) * 0.5 * (1 + math.cos(math.pi * progress))
+                noise_scale = cosine_noise_schedule(epoch, self.training_config.epochs, noise_start, noise_end)
             else:
                 noise_scale = 0.0
 
-            for i, (index, x, labels_batch) in enumerate(train_loader):
+            for index, x, _ in train_loader:
                 decoder_optimizer.zero_grad()
 
                 x, index = x.to(self.device), index.to(self.device)
@@ -501,7 +470,7 @@ class DGDTrainer:
                 loss.backward()
                 decoder_optimizer.step()
 
-                # Step learning rate schedulers (OneCycleLR steps per batch)
+                # Step decoder's cosine scheduler (steps per batch)
                 if decoder_scheduler is not None:
                     decoder_scheduler.step()
 
@@ -525,7 +494,7 @@ class DGDTrainer:
             for param in model.decoder.parameters():
                 param.requires_grad = False
 
-            for i, (index, x, _) in enumerate(val_loader):
+            for index, x, _ in val_loader:
                 x, index = x.to(self.device), index.to(self.device)
 
                 # Forward pass
@@ -666,7 +635,7 @@ class DGDTrainer:
             val_rep.load_state_dict(self.best_model_state['val_rep'])
             # Refit GMM to the best representations
             if self.verbose:
-                print(f"   Refitting GMM to best representations...")
+                print("   Refitting GMM to best representations...")
             with torch.no_grad():
                 representations = rep.z.detach()
                 gmm.fit(representations, max_iter=self.config.model.gmm.max_iter)
@@ -677,7 +646,7 @@ class DGDTrainer:
         final_gmm_fit = getattr(self.training_config, 'final_gmm_fit', False)
         if final_gmm_fit:
             if self.verbose:
-                print(f"\nPerforming final GMM fit for optimal generative model...")
+                print("\nPerforming final GMM fit for optimal generative model...")
             with torch.no_grad():
                 representations = rep.z.detach()
                 gmm.fit(representations, max_iter=self.config.model.gmm.max_iter)
@@ -723,6 +692,11 @@ class DGDTrainer:
             print(f"Training completed: {self.train_losses[-1]:.4f} train, {self.val_losses[-1]:.4f} val")
 
         # Return results
+        early_stopping_patience = getattr(self.training_config, 'early_stopping_patience', None)
+        stopped_early = (
+            early_stopping_patience is not None
+            and self.epochs_without_improvement >= early_stopping_patience
+        )
         return {
             "model": model,
             "rep": rep,
@@ -735,5 +709,5 @@ class DGDTrainer:
             "final_val_loss": self.val_losses[-1],
             "best_train_loss": self.best_train_loss,
             "best_epoch": self.best_epoch,
-            "stopped_early": self.epochs_without_improvement >= getattr(self.training_config, 'early_stopping_patience', float('inf'))
+            "stopped_early": stopped_early,
         }

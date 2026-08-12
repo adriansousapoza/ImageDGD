@@ -1,0 +1,9 @@
+# Control experiment: noise injection off entirely. Every other experiment
+# in this batch trains with noise on by default, so there's currently no
+# clean measurement of whether noise injection is actually helping (vs.
+# hurting, vs. doing nothing) -- this isolates that question.
+experiment_name: "ImageDGD_NoNoiseBaseline"
+description: "Noise injection disabled -- isolates whether noise is actually helping"
+
+training:
+  latent_noise_enabled: false

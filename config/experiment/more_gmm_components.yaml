@@ -1,0 +1,7 @@
+# Experiment: more GMM components (30 instead of the default 20).
+experiment_name: "ImageDGD_GMM30"
+description: "GMM with 30 components instead of the default 20"
+
+model:
+  gmm:
+    n_components: 30

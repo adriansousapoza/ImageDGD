@@ -1,0 +1,9 @@
+# Experiment: lower starting noise -- anneals from 0.1 down to the default
+# end value 0.01, a 10x decay instead of the default 100x (1.0 -> 0.01).
+# Noise is far weaker throughout training than the default.
+experiment_name: "ImageDGD_LowerNoiseStart"
+description: "Noise starts at 0.1 instead of the default 1.0, still ending at 0.01 (10x decay instead of 100x)"
+
+training:
+  latent_noise_start: 0.1
+  latent_noise_end: 0.01

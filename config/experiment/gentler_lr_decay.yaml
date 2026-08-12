@@ -1,0 +1,12 @@
+# Experiment: gentler LR decay -- final LR is only 10x below base_lr,
+# instead of the original 100x (0.01 -> 0.0001 decoder, 0.1 -> 0.001 rep).
+# Explicit values here (not just "whatever config.yaml currently has") so
+# this experiment stays reproducible even if the base config's LR values
+# change again later.
+experiment_name: "ImageDGD_GentlerLRDecay"
+description: "LR decays only 10x (base -> final) instead of the original 100x"
+
+training:
+  lr_scheduler:
+    final_lr_decoder: 0.001        # 0.01 base / 0.001 final = 10x
+    final_lr_representation: 0.01  # 0.1 base / 0.01 final = 10x
