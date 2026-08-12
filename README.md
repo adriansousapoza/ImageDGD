@@ -4,18 +4,26 @@ Deep Generative Decoder (DGD) for image generation on FashionMNIST: a decoder ne
 
 ## Installation
 
-GPU acceleration (cuML/cuDF via RAPIDS) is optional but recommended — it speeds up the PCA/UMAP latent-space visualizations significantly. Without it, everything still runs on CPU/scikit-learn, just slower.
+GPU acceleration (cuDF/cuML via RAPIDS) is optional but recommended — it speeds up the PCA/UMAP latent-space visualizations significantly. Without it, everything still runs on CPU/scikit-learn, just slower. Uses a local [uv](https://github.com/astral-sh/uv) virtual environment (`.venv/`, gitignored) rather than a global one.
 
 ```bash
-./install_rapids.sh       # sets up ~/.venvs/rapids_cuda13 with RAPIDS + PyTorch + requirements.txt
-source activate_rapids.sh # activate it
+curl -LsSf https://astral.sh/uv/install.sh | sh   # if uv isn't already installed
+
+uv venv .venv --python 3.12
+uv pip install --python .venv \
+    --extra-index-url=https://pypi.nvidia.com \
+    "cudf-cu13==26.4.*" "cuml-cu13==26.4.*" \
+    -r requirements.txt
+
+source .venv/bin/activate
 ```
 
-For manual installation or a different CUDA version, follow the [RAPIDS install guide](https://docs.rapids.ai/install/) to pick the right `cudf-cuXX`/`cuml-cuXX` wheels for your system, then:
+`cudf-cu13`/`cuml-cu13` need a matching CUDA 13 toolkit; see the [RAPIDS install guide](https://docs.rapids.ai/install/) for other CUDA versions (swap the `-cu13` suffix, e.g. `-cu12`) or to add other RAPIDS components. Without RAPIDS, just drop that middle `uv pip install` line — `uv venv .venv --python 3.12 && uv pip install --python .venv -r requirements.txt` is enough to run everything on CPU.
+
+Verify the install:
 
 ```bash
-uv pip install torch torchvision   # or the CUDA-matched index for your platform
-uv pip install -r requirements.txt # includes tgmm
+python -c "import torch; print(f'PyTorch {torch.__version__} | CUDA available: {torch.cuda.is_available()}')"
 ```
 
 ## Usage
