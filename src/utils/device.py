@@ -106,12 +106,14 @@ def setup_cuml_acceleration(verbose: bool = True) -> bool:
     bool: True if cuML acceleration was enabled, False otherwise
     """
     try:
-        import cuml 
+        import cuml
         from cuml.accel import install
         install()
         if verbose:
             print("cuML GPU acceleration enabled")
             print(f'cuML version: {cuml.__version__}')
+        return True
     except ImportError:
         if verbose:
             print("cuML not installed, using CPU for sklearn operations")
+        return False

@@ -1,6 +1,6 @@
 import torch.nn as nn
 from torch import Tensor
-from abc import abstractmethod
+from abc import ABC, abstractmethod
 from typing import List, Tuple
 import math
 
@@ -29,7 +29,7 @@ class DGD(nn.Module):
         return self.decoder(z)
 
 
-class BaseDecoder(nn.Module):
+class BaseDecoder(nn.Module, ABC):
     """
     Base decoder class for encoder-free framework
     """
