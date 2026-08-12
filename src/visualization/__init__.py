@@ -1,14 +1,15 @@
 from .image import (
-    organize_by_class, 
-    plot_image_grid, 
-    plot_original_and_reconstructed, 
-    visualize_reconstruction_quality, 
-    plot_images_by_class, 
-    plot_generated_samples
+    organize_by_class,
+    plot_image_grid,
+    plot_images_by_class,
+    plot_generated_samples,
+    plot_ground_truth_and_reconstructions_by_class,
 )
 
 from .latent import (
-    plot_latent_space
+    plot_latent_space,
+    generate_latent_space_figures,
+    plot_noise_comparison,
 )
 
 from .loss import (
@@ -23,12 +24,13 @@ __all__ = [
     # Image visualization functions
     'organize_by_class',
     'plot_image_grid',
-    'plot_original_and_reconstructed',
-    'visualize_reconstruction_quality',
     'plot_images_by_class',
     'plot_generated_samples',
+    'plot_ground_truth_and_reconstructions_by_class',
     # Latent space visualization functions
     'plot_latent_space',
+    'generate_latent_space_figures',
+    'plot_noise_comparison',
     # Loss and dynamics visualization functions
     'plot_training_analysis',
     'plot_training_dynamics',

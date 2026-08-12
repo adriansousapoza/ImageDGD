@@ -1,5 +1,4 @@
 from .dataloader import (
-    IndexedDataset,
     create_dataloaders,
     get_sample_batches,
     save_sample_batches,
@@ -9,7 +8,6 @@ from .dataloader import (
 )
 
 __all__ = [
-    'IndexedDataset',
     'create_dataloaders',
     'get_sample_batches',
     'save_sample_batches',

@@ -5,6 +5,8 @@ import matplotlib.pyplot as plt
 from typing import List, Optional, Any
 from omegaconf import DictConfig
 
+from ..utils.schedules import cosine_noise_schedule
+
 
 def plot_training_analysis(
     train_losses: List[float],
@@ -197,9 +199,6 @@ def plot_training_dynamics(
     save_path : Optional path to save the figure
     show : Whether to display the figure
     """
-    import math
-    import numpy as np
-
     fig2, axes2 = plt.subplots(2, 2, figsize=(16, 12))
     fig2.suptitle('Training Dynamics', fontsize=16, fontweight='bold')
 
@@ -237,7 +236,7 @@ def plot_training_dynamics(
         )
         axes2[1].set_xlabel('Epoch')
         axes2[1].set_ylabel('Beta_1')
-        axes2[1].set_title('Momentum Schedule (OneCycleLR)')
+        axes2[1].set_title('Momentum (Beta_1) -- constant under cosine annealing')
         axes2[1].legend()
         axes2[1].grid(True, alpha=0.3)
     else:
@@ -245,17 +244,16 @@ def plot_training_dynamics(
         axes2[1].set_title('Momentum Schedule')
 
     # 3. Noise Level (Cosine Annealing)
-    if hasattr(trainer.training_config, 'latent_noise_scale') and trainer.training_config.latent_noise_scale > 0:
+    if trainer.training_config.get('latent_noise_enabled', False):
         noise_start = trainer.training_config.get('latent_noise_start', 1.0)
         noise_end = trainer.training_config.get('latent_noise_end', 0.01)
         total_epochs = len(learning_rates)
 
         # Calculate noise schedule for all epochs
-        noise_schedule = []
-        for epoch in range(1, total_epochs + 1):
-            progress = (epoch - 1) / max(total_epochs - 1, 1)
-            noise_scale = noise_end + (noise_start - noise_end) * 0.5 * (1 + math.cos(math.pi * progress))
-            noise_schedule.append(noise_scale)
+        noise_schedule = [
+            cosine_noise_schedule(epoch, total_epochs, noise_start, noise_end)
+            for epoch in range(1, total_epochs + 1)
+        ]
 
         axes2[2].plot(
             range(start_epoch, len(noise_schedule) + 1),

@@ -6,35 +6,8 @@ import torch
 from torch.utils.data import Dataset, DataLoader, ConcatDataset
 from torchvision import datasets, transforms
 import numpy as np
-from typing import Tuple, Optional, List, Dict, Any
+from typing import Tuple, List
 from omegaconf import DictConfig
-
-
-class IndexedDataset(Dataset):
-    """
-    Dataset wrapper that provides indices along with data and labels.
-    Supports subsetting for debugging purposes.
-    """
-
-    def __init__(self, dataset: Dataset, subset_fraction: float = 1.0):
-        self.dataset = dataset
-
-        if subset_fraction < 1.0:
-            total_size = len(dataset)
-            subset_size = int(total_size * subset_fraction)
-            all_indices = list(range(total_size))
-            np.random.shuffle(all_indices)
-            self.indices = all_indices[:subset_size]
-        else:
-            self.indices = list(range(len(dataset)))
-
-    def __len__(self) -> int:
-        return len(self.indices)
-
-    def __getitem__(self, index: int) -> Tuple[int, torch.Tensor, int]:
-        orig_index = self.indices[index]
-        data, target = self.dataset[orig_index]
-        return orig_index, data, target
 
 
 def get_transform(transform_config: List[str]) -> transforms.Compose:
@@ -110,8 +83,8 @@ def create_dataloaders(config: DictConfig) -> Tuple[DataLoader, DataLoader, Data
 
     if data_config.dataset_name != "FashionMNIST":
         raise ValueError(f"Unknown dataset: {data_config.dataset_name}")
-    actual_class_names = ['T-shirt/top', 'Trouser', 'Pullover', 'Dress', 'Coat',
-                         'Sandal', 'Shirt', 'Sneaker', 'Bag', 'Ankle boot']
+    class_names = ['T-shirt/top', 'Trouser', 'Pullover', 'Dress', 'Coat',
+                   'Sandal', 'Shirt', 'Sneaker', 'Bag', 'Ankle boot']
 
     train_transform = get_transform(data_config.transforms.train)
     val_transform = get_transform(data_config.transforms.val)
@@ -166,8 +139,6 @@ def create_dataloaders(config: DictConfig) -> Tuple[DataLoader, DataLoader, Data
         indexed_test_dataset, batch_size=batch_size, shuffle=data_config.shuffle_test,
         num_workers=data_config.num_workers, pin_memory=data_config.pin_memory
     )
-
-    class_names = actual_class_names
 
     print(f'Train dataset: {len(indexed_train_dataset)} samples ({len(indexed_train_dataset)/total_size*100:.1f}% of total)')
     print(f'Val dataset: {len(indexed_val_dataset)} samples ({len(indexed_val_dataset)/total_size*100:.1f}% of total)')

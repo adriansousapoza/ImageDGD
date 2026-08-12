@@ -2,6 +2,7 @@
 Device selection and setup utilities for PyTorch.
 """
 
+import cudf
 import torch
 import numpy as np
 from typing import Optional
@@ -23,7 +24,7 @@ def setup_device(verbose: bool = True) -> torch.device:
     if not torch.cuda.is_available():
         device = torch.device('cpu')
         if verbose:
-            print(f"Using CPU")
+            print("Using CPU")
         return device
     
     # Clear cache before scanning
@@ -105,10 +106,12 @@ def setup_cuml_acceleration(verbose: bool = True) -> bool:
     bool: True if cuML acceleration was enabled, False otherwise
     """
     try:
+        import cuml 
         from cuml.accel import install
         install()
         if verbose:
             print("cuML GPU acceleration enabled")
+            print(f'cuML version: {cuml.__version__}')
     except ImportError:
         if verbose:
             print("cuML not installed, using CPU for sklearn operations")

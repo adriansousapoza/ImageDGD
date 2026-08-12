@@ -4,10 +4,8 @@ Image grid visualization utilities for DGD models.
 
 import torch
 import matplotlib.pyplot as plt
-from typing import List, Optional, Tuple, Dict, Any
-from pathlib import Path
+from typing import List, Optional, Tuple
 import numpy as np
-from omegaconf import DictConfig, OmegaConf
 
 
 def organize_by_class(images: torch.Tensor, labels: torch.Tensor, 
@@ -180,146 +178,92 @@ def plot_generated_samples(images: torch.Tensor,
     return fig
 
 
-def plot_original_and_reconstructed(images: torch.Tensor,
-                                   reconstructions: torch.Tensor,
-                                   labels: torch.Tensor,
-                                   class_names: List[str],
-                                   split_name: str = "Train",
-                                   n_per_class: int = 5,
-                                   cmap: str = 'viridis',
-                                   figsize: Optional[Tuple[int, int]] = None) -> Tuple[plt.Figure, plt.Figure]:
+def plot_ground_truth_and_reconstructions_by_class(
+    images: torch.Tensor,
+    reconstructions: torch.Tensor,
+    labels: torch.Tensor,
+    class_names: List[str],
+    title: str = "Ground Truth vs Reconstructed",
+    n_per_class: int = 5,
+    cmap: str = 'viridis',
+    denormalize: bool = False,
+    figsize: Optional[Tuple[int, int]] = None,
+    save_path: Optional[str] = None,
+    show: bool = True) -> plt.Figure:
     """
-    Plot original images and their reconstructions side by side.
-    
+    Plot ground-truth and reconstructed images side by side, per class.
+
+    For each class, produces a GT column immediately followed by a Recon
+    column (2 * n_classes columns total). `images` and `reconstructions`
+    must be the same length and in the same sample order (e.g. both indexed
+    by the same `indices` tensor), so that `labels[i]` identifies the same
+    underlying sample in both tensors.
+
     Parameters:
     ----------
-    images: Original images tensor (N, C, H, W)
-    reconstructions: Reconstructed images tensor (N, C, H, W)
-    labels: Labels tensor (N,)
+    images: Ground-truth images, shape (N, C, H, W)
+    reconstructions: Reconstructed images, shape (N, C, H, W), same order as images
+    labels: Tensor of labels with shape (N,)
     class_names: List of class names
-    split_name: Name of the data split (e.g., "Train", "Test")
-    n_per_class: Number of samples per class
+    title: Title for the plot
+    n_per_class: Number of samples per class to display
     cmap: Colormap to use
-    figsize: Figure size. If None, auto-calculated
-    
+    denormalize: Whether to map images from [-1,1] to [0,1] before display.
+        Leave False for decoders with a sigmoid final activation, whose
+        output (and ToTensor-loaded targets) already live in [0,1].
+    figsize: Figure size (width, height). If None, auto-calculated
+    save_path: Optional path to save the figure
+    show: Whether to display the figure
+
     Returns:
     -------
-    Tuple of (original_figure, reconstruction_figure)
+    Matplotlib figure object
     """
     n_classes = len(class_names)
-    
-    # Organize by class
-    originals_by_class = organize_by_class(images, labels, n_classes, n_per_class)
-    reconstructions_by_class = organize_by_class(reconstructions, labels, n_classes, n_per_class)
-    
-    # Plot originals
-    fig_orig = plot_image_grid(
-        originals_by_class,
-        class_names,
-        title=f"{split_name}: Original Images by Class (Label Order)",
-        n_rows=n_per_class,
-        cmap=cmap,
-        denormalize=True,
-        figsize=figsize
-    )
-    
-    # Plot reconstructions
-    fig_recon = plot_image_grid(
-        reconstructions_by_class,
-        class_names,
-        title=f"{split_name}: Reconstructed Images by Class (Label Order)",
-        n_rows=n_per_class,
-        cmap=cmap,
-        denormalize=True,
-        figsize=figsize
-    )
-    
-    return fig_orig, fig_recon
+    gt_by_class = organize_by_class(images, labels, n_classes, n_per_class)
+    recon_by_class = organize_by_class(reconstructions, labels, n_classes, n_per_class)
 
+    n_cols = n_classes * 2
+    n_rows = n_per_class
 
-def visualize_reconstruction_quality(model,
-                                    rep_layer,
-                                    test_rep_layer,
-                                    sample_data: Tuple,
-                                    class_names: List[str],
-                                    device: torch.device,
-                                    n_per_class: int = 5,
-                                    cmap: str = 'viridis') -> dict:
-    """
-    Comprehensive visualization of reconstruction quality for train and test sets.
-    
-    Parameters:
-    ----------
-    model: DGD model
-    rep_layer: Training representation layer
-    test_rep_layer: Test representation layer
-    sample_data: Tuple of (indices_train, images_train, labels_train,
-                           indices_test, images_test, labels_test)
-    class_names: List of class names
-    device: Device to run inference on
-    n_per_class: Number of samples per class
-    cmap: Colormap to use
-    
-    Returns:
-    -------
-    Dictionary containing:
-        - train_mse: Training MSE statistics
-        - test_mse: Test MSE statistics
-        - figures: Dictionary of matplotlib figures
-    """
-    import torch.nn.functional as F
-    
-    # Set model to evaluation mode
-    model.eval()
-    
-    # Unpack sample data
-    indices_train, images_train, labels_train, indices_test, images_test, labels_test = sample_data
-    
-    # Move to device
-    indices_train = indices_train.to(device)
-    images_train = images_train.to(device)
-    indices_test = indices_test.to(device)
-    images_test = images_test.to(device)
-    
-    with torch.no_grad():
-        # Generate reconstructions
-        z_train = rep_layer(indices_train)
-        recon_train = model.decoder(z_train)
-        
-        z_test = test_rep_layer(indices_test)
-        recon_test = model.decoder(z_test)
-        
-        # Compute reconstruction errors
-        train_mse = F.mse_loss(recon_train, images_train, reduction='none').mean(dim=[1,2,3])
-        test_mse = F.mse_loss(recon_test, images_test, reduction='none').mean(dim=[1,2,3])
-    
-    # Create visualizations
-    train_orig_fig, train_recon_fig = plot_original_and_reconstructed(
-        images_train, recon_train, labels_train, class_names,
-        split_name="Train", n_per_class=n_per_class, cmap=cmap
-    )
-    
-    test_orig_fig, test_recon_fig = plot_original_and_reconstructed(
-        images_test, recon_test, labels_test, class_names,
-        split_name="Test", n_per_class=n_per_class, cmap=cmap
-    )
-    
-    return {
-        'train_mse': {
-            'mean': train_mse.mean().item(),
-            'std': train_mse.std().item()
-        },
-        'test_mse': {
-            'mean': test_mse.mean().item(),
-            'std': test_mse.std().item()
-        },
-        'figures': {
-            'train_original': train_orig_fig,
-            'train_reconstruction': train_recon_fig,
-            'test_original': test_orig_fig,
-            'test_reconstruction': test_recon_fig
-        }
-    }
+    if figsize is None:
+        figsize = (n_cols * 1.2, n_rows * 1.4 + 0.6)
+
+    fig, axes = plt.subplots(n_rows, n_cols, figsize=figsize)
+    fig.suptitle(title, fontsize=16, fontweight='bold')
+
+    if n_rows == 1:
+        axes = axes.reshape(1, -1)
+
+    def _draw_column(col: int, class_images: torch.Tensor):
+        for row in range(n_rows):
+            ax = axes[row, col]
+            if row < len(class_images):
+                img = class_images[row].detach().cpu().squeeze()
+                if denormalize:
+                    img = torch.clamp((img + 1) / 2, 0, 1)
+                ax.imshow(img, cmap=cmap, vmin=0, vmax=1)
+            ax.axis('off')
+
+    for class_idx in range(n_classes):
+        gt_col, recon_col = class_idx * 2, class_idx * 2 + 1
+        _draw_column(gt_col, gt_by_class[class_idx])
+        _draw_column(recon_col, recon_by_class[class_idx])
+
+        axes[0, gt_col].set_title(f"{class_names[class_idx]}\nGT", fontsize=8)
+        axes[0, recon_col].set_title("Recon", fontsize=8)
+
+    plt.tight_layout()
+
+    if save_path:
+        fig.savefig(save_path, dpi=150, bbox_inches='tight')
+
+    if show:
+        plt.show()
+    else:
+        plt.close(fig)
+
+    return fig
 
 
 def plot_images_by_class(images: torch.Tensor,

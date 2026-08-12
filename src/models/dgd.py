@@ -1,8 +1,6 @@
-import torch
 import torch.nn as nn
 from torch import Tensor
-import torch.nn.functional as F
-from abc import ABC, abstractmethod
+from abc import abstractmethod
 from typing import List, Tuple
 import math
 
@@ -29,44 +27,6 @@ class DGD(nn.Module):
             raise ValueError("Either indices or z must be provided")
             
         return self.decoder(z)
-    
-    def sample_from_gmm(self, n_samples=1):
-        """
-        Sample from the GMM and generate images.
-        """
-        if self.gmm is None:
-            raise ValueError("GMM is not set")
-            
-        z, _ = self.gmm.sample(n_samples)
-        return self.decoder(z)
-    
-    def loss_function(self, x, indices=None, z=None, gmm_weight=1.0):
-        """
-        Compute the loss function.
-        """
-        if z is None and indices is not None and self.rep_layer is not None:
-            z = self.rep_layer(indices)
-        elif z is None and indices is None:
-            raise ValueError("Either indices or z must be provided")
-            
-        # Reconstruction
-        x_recon = self.decoder(z)
-        recon_loss = F.binary_cross_entropy(x_recon, x, reduction='sum')
-        
-        # GMM loss
-        gmm_loss = 0
-        if self.gmm is not None:
-            gmm_loss = -gmm_weight * torch.sum(self.gmm.score_samples(z))
-            
-        # Total loss
-        total_loss = recon_loss + gmm_loss
-        
-        return {
-            'loss': total_loss,
-            'recon_loss': recon_loss,
-            'gmm_loss': gmm_loss,
-            'recon': x_recon
-        }
 
 
 class BaseDecoder(nn.Module):
@@ -93,26 +53,6 @@ class BaseDecoder(nn.Module):
         :return: (Tensor) Output tensor with reconstructed images
         """
         pass
-
-    def sample(self, num_samples: int, latent_dim: int, device: torch.device, **kwargs) -> Tensor:
-        """
-        Samples from a standard normal distribution and transforms
-        to image space using the decoder.
-        :param num_samples: (Int) Number of samples
-        :param latent_dim: (Int) Dimensionality of latent space
-        :param device: Device to run the model on
-        :return: (Tensor) [B x C x H x W]
-        """
-        z = torch.randn(num_samples, latent_dim).to(device)
-        return self.decode(z)
-    
-    def generate(self, z: Tensor, **kwargs) -> Tensor:
-        """
-        Given a latent vector z, returns the reconstructed image
-        :param z: (Tensor) [B x D]
-        :return: (Tensor) [B x C x H x W]
-        """
-        return self.decode(z)
 
 
 class ConvDecoder(BaseDecoder):
@@ -253,11 +193,17 @@ class ConvDecoder(BaseDecoder):
         w_upsamples = int(math.log2(output_size[1] / init_size[1]))
         num_upsamples = max(h_upsamples, w_upsamples)
         
-        # Make sure we have enough hidden_dims for the required upsampling
-        if len(hidden_dims) < num_upsamples + 1:
+        # Make sure we have enough hidden_dims for the required upsampling.
+        # Total upsample stages produced below = len(hidden_dims): the main
+        # loop contributes (len(hidden_dims) - 1) and final_layer always
+        # contributes one more implicit upsample. Padding to num_upsamples
+        # (not num_upsamples + 1) makes the two add up to exactly what's
+        # needed, so the network lands on output_size without overshooting
+        # and needing a lossy downsize correction afterwards.
+        if len(hidden_dims) < num_upsamples:
             # Extend hidden_dims if needed
             last_size = hidden_dims[-1]
-            for _ in range(num_upsamples + 1 - len(hidden_dims)):
+            for _ in range(num_upsamples - len(hidden_dims)):
                 hidden_dims.append(last_size // 2 if last_size > 8 else last_size)
         
         # hidden_dims should be specified high→low (e.g., [128, 64, 32])
@@ -270,7 +216,13 @@ class ConvDecoder(BaseDecoder):
         
         # Initial linear projection from latent space to spatial dimensions
         self.decoder_input = nn.Linear(latent_dim, hidden_dims[0] * init_size[0] * init_size[1])
-        
+
+        # Normalize + activate the projected feature map before the first
+        # conv. Without this, Linear -> reshape -> Conv is one unbroken
+        # affine map, so the projection contributes no nonlinear capacity.
+        self.input_norm = self.normalizations[normalization](hidden_dims[0])
+        self.input_activation = activation_fn
+
         # Build decoder layers
         modules = []
         
@@ -308,18 +260,10 @@ class ConvDecoder(BaseDecoder):
                 layer_modules.append(upsample_layer)
             
             layer_modules.append(conv_layer)
-            
+
             # Add normalization
-            if normalization == 'batch':
-                layer_modules.append(nn.BatchNorm2d(hidden_dims[i + 1]))
-            elif normalization == 'layer':
-                layer_modules.append(nn.GroupNorm(1, hidden_dims[i + 1]))
-            elif normalization == 'group':
-                num_groups = min(8, hidden_dims[i + 1])
-                layer_modules.append(nn.GroupNorm(num_groups, hidden_dims[i + 1]))
-            elif normalization == 'instance':
-                layer_modules.append(nn.InstanceNorm2d(hidden_dims[i + 1]))
-            
+            layer_modules.append(self.normalizations[normalization](hidden_dims[i + 1]))
+
             # Add activation
             layer_modules.append(activation_fn)
             
@@ -357,18 +301,10 @@ class ConvDecoder(BaseDecoder):
             )
         
         final_modules.append(final_conv1)
-        
+
         # Add normalization
-        if normalization == 'batch':
-            final_modules.append(nn.BatchNorm2d(hidden_dims[-1]))
-        elif normalization == 'layer':
-            final_modules.append(nn.GroupNorm(1, hidden_dims[-1]))
-        elif normalization == 'group':
-            num_groups = min(8, hidden_dims[-1])
-            final_modules.append(nn.GroupNorm(num_groups, hidden_dims[-1]))
-        elif normalization == 'instance':
-            final_modules.append(nn.InstanceNorm2d(hidden_dims[-1]))
-        
+        final_modules.append(self.normalizations[normalization](hidden_dims[-1]))
+
         # Add activation
         final_modules.append(activation_fn)
         
@@ -385,15 +321,26 @@ class ConvDecoder(BaseDecoder):
         
         self.needs_final_upsample = (current_h != output_size[0] or current_w != output_size[1])
         if self.needs_final_upsample:
-            # Use the same upsampling mode as the rest of the network
-            upsample_mode = upsampling_mode if upsampling_mode != 'transpose' else 'bilinear'
-            if upsample_mode == 'nearest':
-                self.final_upsample = nn.Upsample(size=output_size, mode=upsample_mode)
+            if current_h > output_size[0] or current_w > output_size[1]:
+                # Downsizing: average-pool instead of nn.Upsample. With
+                # mode='nearest'/'bilinear', Upsample used to shrink a
+                # tensor decimates it (samples one input pixel per output
+                # pixel), so most of the preceding conv's output never
+                # reaches the loss and never gets a gradient. AdaptiveAvgPool2d
+                # averages every input pixel into the output it maps to, so
+                # nothing computed upstream is discarded.
+                self.final_upsample = nn.AdaptiveAvgPool2d(output_size)
             else:
-                self.final_upsample = nn.Upsample(size=output_size, mode=upsample_mode, align_corners=False)
-        
+                # Genuine upsampling (current < output): interpolation adds
+                # pixels rather than discarding them, so this stays lossless.
+                upsample_mode = upsampling_mode if upsampling_mode != 'transpose' else 'bilinear'
+                if upsample_mode == 'nearest':
+                    self.final_upsample = nn.Upsample(size=output_size, mode=upsample_mode)
+                else:
+                    self.final_upsample = nn.Upsample(size=output_size, mode=upsample_mode, align_corners=False)
+
         self.decoder = nn.Sequential(*modules)
-    
+
     def decode(self, z: Tensor) -> Tensor:
         """
         Maps the given latent codes onto the image space.
@@ -401,14 +348,15 @@ class ConvDecoder(BaseDecoder):
         :return: (Tensor) [B x C x H x W]
         """
         result = self.decoder_input(z)
-        result = result.view(-1, result.shape[1] // (self.init_size[0] * self.init_size[1]), 
+        result = result.view(-1, result.shape[1] // (self.init_size[0] * self.init_size[1]),
                             self.init_size[0], self.init_size[1])
+        result = self.input_activation(self.input_norm(result))
         result = self.decoder(result)
         result = self.final_layer(result)
-        
+
         if self.needs_final_upsample:
             result = self.final_upsample(result)
-            
+
         return result
     
     def forward(self, z: Tensor, **kwargs) -> Tensor:

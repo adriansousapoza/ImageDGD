@@ -84,3 +84,13 @@ optuna_studies/
 
 # DGD schematic
 schematic/
+
+# Subagent-driven-development scratch workspace (ledgers, briefs, review packages)
+.superpowers/
+
+# Experiment run outputs (config/experiment/ configs themselves are tracked)
+experiments/
+
+# Agent / editor tooling
+.claude/
+.serena/
