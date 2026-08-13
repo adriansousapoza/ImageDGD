@@ -30,6 +30,8 @@ python -c "import torch; print(f'PyTorch {torch.__version__} | CUDA available: {
 
 Start with `notebooks/dgd_training_demo.ipynb` for a full training walkthrough, then `notebooks/dgd_test_inference.ipynb` for inference on held-out data. `notebooks/run_experiments.ipynb` runs a batch of ablations defined as config overrides in `config/experiment/`.
 
+Two smaller, faster notebooks demonstrate the same mechanism at toy scale: `notebooks/toy_dgd_blobs.ipynb` (synthetic 2-blob data, a small MLP decoder, runs in seconds) and `notebooks/toy_dgd_mnist.ipynb` (two real MNIST digits, the exact `ConvDecoder`/`config.yaml` architecture the FashionMNIST pipeline uses, runs in a few minutes).
+
 ## Project Structure
 
 - `config/` - Hydra base config (`config.yaml`) and per-experiment overrides (`experiment/`)
