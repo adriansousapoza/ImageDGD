@@ -1,0 +1,21 @@
+# Experiment: does noise annealing all the way toward ~0 remove the only
+# counter-pressure against the GMM's pull, once that pull's own strength
+# (~1/covariance) grows as clusters sharpen? The trajectory diagnostic (see
+# conversation) found that late in a real run, with noise already down to
+# ~0.02 per-coordinate std, points still moved 3-6x farther than that
+# residual noise displaced them -- optimization dynamics, not noise, were
+# doing the moving by that point. This tests never letting noise get that
+# small: latent_noise_end raised to 1.0 (per-coordinate std ~0.35 at dim=8,
+# close to where reconstruction quality peaked in that same run before things
+# degraded), so there's always some spread-preserving pressure left, at the
+# cost of never reaching the crispest possible reconstructions.
+experiment_name: "ImageDGD_SustainedNoiseFloor"
+description: "latent_noise_end raised from 0.03 to 1.0 -- noise never anneals down to near-zero"
+
+training:
+  latent_noise_end: 1.0
+
+  # Make sure the noise/spread diagnostic gets generated throughout this run.
+  plot_interval: 10
+  inference:
+    plot_interval: 10

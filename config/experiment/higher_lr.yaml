@@ -1,0 +1,19 @@
+# Experiment: now that decoder/representation LR are matched (0.01 -> 0.001
+# both, per the manual experiment showing matched LR is more stable but AMI
+# dropped slightly), try nudging both up together -- does a bit more step
+# size recover some of that AMI without reintroducing the instability the
+# old 10x-larger (0.1) representation LR caused?
+experiment_name: "ImageDGD_HigherLR"
+description: "Both decoder and representation LR raised 0.01 -> 0.015 (final 0.001 -> 0.0015), kept matched"
+
+training:
+  optimizer:
+    decoder:
+      lr: 0.015
+    representation:
+      lr: 0.015
+  lr_scheduler:
+    base_lr_decoder: 0.015
+    final_lr_decoder: 0.0015
+    base_lr_representation: 0.015
+    final_lr_representation: 0.0015

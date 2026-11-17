@@ -1,0 +1,20 @@
+# Experiment: does a representation LR 10x the decoder's make points move
+# (and converge onto their GMM component's mean) too aggressively each step?
+# Matches the decoder's own LR schedule exactly (0.01 -> 0.001) instead of
+# the default 10x-larger 0.1 -> 0.01. Everything else (noise schedule,
+# reg_covar, GMM config) stays at config.yaml's current defaults.
+experiment_name: "ImageDGD_LowerRepLR"
+description: "Representation LR matches the decoder's (0.01 -> 0.001) instead of being 10x larger"
+
+training:
+  optimizer:
+    representation:
+      lr: 0.01
+  lr_scheduler:
+    base_lr_representation: 0.01
+    final_lr_representation: 0.001
+
+  # Make sure the noise/spread diagnostic gets generated throughout this run.
+  plot_interval: 10
+  inference:
+    plot_interval: 10

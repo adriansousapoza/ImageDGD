@@ -1,0 +1,19 @@
+# Experiment: GMM covariance-structure sweep (5 of 6 -- see covariance_full
+# for the shared rationale and the rest of the same batch: covariance_diag,
+# covariance_spherical, covariance_tied_full, covariance_tied_spherical).
+#
+# "tied_diag": every component shares one diagonal covariance (same
+# per-dimension spread everywhere, no cross-dimension correlation, only the
+# means differ) -- pooled across all N points like tied_full, but axis-
+# aligned and cheaper to fit.
+experiment_name: "ImageDGD_CovarianceTiedDiag"
+description: "GMM covariance_type=tied_diag -- one shared diagonal covariance across all components"
+
+model:
+  gmm:
+    covariance_type: "tied_diag"
+
+training:
+  plot_interval: 10
+  inference:
+    plot_interval: 10

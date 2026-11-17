@@ -1,0 +1,11 @@
+# Experiment: latent dimension 16 instead of 8. latent_noise_start/end are
+# already dimension-independent (a target displacement *norm* in z-space --
+# noise_std_for_dim divides by sqrt(n_features) internally, see
+# config.yaml's comment), so they do NOT need rescaling here; same for
+# model.gmm.n_features (null -> inherits representation.n_features).
+experiment_name: "ImageDGD_LatentDim16"
+description: "Latent dimension raised from 8 to 16"
+
+model:
+  representation:
+    n_features: 16

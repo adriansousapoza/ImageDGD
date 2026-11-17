@@ -1,0 +1,15 @@
+# Experiment: AdamW's weight decay term is scaled by the current LR each
+# step (theta -= lr * wd * theta, alongside the update), so it's not
+# redundant with the cosine LR scheduler -- it's a separate shrink-to-zero
+# force whose per-step strength happens to anneal down with LR automatically.
+# This tests whether a stronger decay (0.01 -> 0.05, both decoder and
+# representation) helps by itself, independent of the LR experiments above.
+experiment_name: "ImageDGD_HigherWeightDecay"
+description: "Decoder and representation weight_decay raised 0.01 -> 0.05"
+
+training:
+  optimizer:
+    decoder:
+      weight_decay: 0.05
+    representation:
+      weight_decay: 0.05

@@ -1,0 +1,13 @@
+# Experiment: plain config.yaml defaults, no overrides -- a same-batch,
+# same-data-split control for lower_rep_lr / sustained_noise_floor /
+# covariance_prior_strong to be compared against. Reproduces the collapse
+# dynamic from the 20260814_113539_ImageDGD_Default run (reg_covar since
+# reverted to its numerically-safe default there -- see config.yaml).
+experiment_name: "ImageDGD_Baseline"
+description: "Unmodified config.yaml defaults -- control run for this batch"
+
+training:
+  # Make sure the noise/spread diagnostic gets generated throughout this run.
+  plot_interval: 10
+  inference:
+    plot_interval: 10

@@ -1,0 +1,19 @@
+# Experiment: GMM covariance-structure sweep (3 of 6 -- see covariance_full
+# for the shared rationale and the rest of the same batch: covariance_diag,
+# covariance_tied_full, covariance_tied_diag, covariance_tied_spherical).
+#
+# "spherical": every component gets its own single scalar variance (an
+# isotropic ball, same spread in every latent dimension) -- one parameter
+# per component, the cheapest per-component covariance short of tying
+# components together entirely.
+experiment_name: "ImageDGD_CovarianceSpherical"
+description: "GMM covariance_type=spherical -- each component has its own single (isotropic) variance"
+
+model:
+  gmm:
+    covariance_type: "spherical"
+
+training:
+  plot_interval: 10
+  inference:
+    plot_interval: 10

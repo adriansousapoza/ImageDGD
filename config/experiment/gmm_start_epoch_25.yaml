@@ -1,0 +1,11 @@
+# Experiment: introduce the GMM prior earlier (epoch 25 instead of 50) --
+# representations get half as long to organize on reconstruction alone
+# before the prior starts pulling. refit_gmm_interval stays at 50: the GMM
+# still fits every epoch once epoch > first_epoch_gmm (cheap warm-started
+# update), refit_gmm_interval just controls which of those epochs gets a
+# full (not warm-started) refit.
+experiment_name: "ImageDGD_GMMStartEpoch25"
+description: "GMM prior introduced at epoch 25 instead of the default 50"
+
+training:
+  first_epoch_gmm: 25

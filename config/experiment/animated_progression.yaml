@@ -1,0 +1,24 @@
+# Experiment: animated training/inference progression. Everything else stays
+# at config.yaml's defaults -- the only change is checkpointing/snapshotting
+# often enough to make a watchable animation afterwards.
+#
+# training.plot_interval (trainer.py) and training.inference.plot_interval
+# both default to null: no intermediate checkpoints/snapshots, only the
+# best/final model gets plotted. Setting them here means
+# generate_training_figures / generate_inference_figures (report.py) will
+# additionally write one GIF + MP4 per figure kind (latent_train, recon_train,
+# latent_val, recon_val, noise_train, noise_val for training; latent_test,
+# recon_test, noise_test for inference) under figures/training/animations/,
+# stitched from the per-epoch/per-step PNGs in order via
+# src/visualization/animate.py.
+#
+# 10 is a reasonable default cadence for the full 200-epoch / 400-step runs
+# config.yaml specifies by default (20 training frames, 40 inference frames) --
+# lower it for a shorter run, or to catch faster-moving early dynamics.
+experiment_name: "ImageDGD_AnimatedProgression"
+description: "Checkpoints/plots every 10 epochs during training and every 10 steps during inference, for GIF/MP4 progression animations"
+
+training:
+  plot_interval: 10
+  inference:
+    plot_interval: 10

@@ -1,0 +1,10 @@
+# Experiment: GMM component count sweep (15 vs 20 vs 25 -- see
+# gmm_components_15.yaml / gmm_components_25.yaml). This one restates the
+# current config.yaml default (20) explicitly so all three land in the same
+# experiment batch and are directly comparable.
+experiment_name: "ImageDGD_GMM20"
+description: "GMM with 20 components -- same as config.yaml default, run alongside the 15/25 sweep"
+
+model:
+  gmm:
+    n_components: 20

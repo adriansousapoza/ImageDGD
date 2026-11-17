@@ -1,0 +1,9 @@
+# Experiment: introduce the GMM prior later (epoch 100 instead of 50) --
+# representations get twice as long to organize on reconstruction alone
+# (and noise has annealed further down, per the cosine schedule over the
+# full 200 epochs) before the prior starts pulling.
+experiment_name: "ImageDGD_GMMStartEpoch100"
+description: "GMM prior introduced at epoch 100 instead of the default 50"
+
+training:
+  first_epoch_gmm: 100

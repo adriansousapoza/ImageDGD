@@ -1,0 +1,8 @@
+# Experiment: GMM component count sweep (15 vs 20 vs 25 -- see
+# gmm_components_15.yaml / gmm_components_20.yaml).
+experiment_name: "ImageDGD_GMM25"
+description: "GMM with 25 components instead of the default 20"
+
+model:
+  gmm:
+    n_components: 25

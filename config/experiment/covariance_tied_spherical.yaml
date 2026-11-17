@@ -1,0 +1,23 @@
+# Experiment: GMM covariance-structure sweep (6 of 6 -- see covariance_full
+# for the shared rationale and the rest of the same batch: covariance_diag,
+# covariance_spherical, covariance_tied_full, covariance_tied_diag). This one
+# restates the current config.yaml default (tied_spherical) explicitly so
+# all six land in the same experiment batch and are directly comparable --
+# same pattern gmm_components_20.yaml uses for its own sweep.
+#
+# "tied_spherical": every component shares one single scalar variance (same
+# isotropic spread everywhere, only the means differ) -- the fewest
+# covariance parameters of the six (just one number, total), and the type
+# config.yaml's own reg_covar/collapse-dynamics comments were calibrated
+# against.
+experiment_name: "ImageDGD_CovarianceTiedSpherical"
+description: "GMM covariance_type=tied_spherical -- same as config.yaml default, run alongside the covariance-structure sweep"
+
+model:
+  gmm:
+    covariance_type: "tied_spherical"
+
+training:
+  plot_interval: 10
+  inference:
+    plot_interval: 10

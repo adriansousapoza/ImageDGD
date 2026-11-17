@@ -1,0 +1,9 @@
+# Experiment: latent dimension 4 instead of 8. Same rationale as
+# latent_dim_16.yaml -- noise_start/end and gmm.n_features don't need
+# rescaling, the dimension-adjustment is already handled internally.
+experiment_name: "ImageDGD_LatentDim4"
+description: "Latent dimension lowered from 8 to 4"
+
+model:
+  representation:
+    n_features: 4

@@ -1,0 +1,9 @@
+# Experiment: a modest bump to starting noise -- 1.0 -> 1.5 (50% more),
+# still ending at the default 0.01. Distinct from higher_noise_start.yaml
+# (1.0 -> 10.0, a 1000x decay) which tests a much more extreme regime; this
+# one asks whether a small increase alone shifts the collapse/AMI tradeoff.
+experiment_name: "ImageDGD_SlightlyHigherNoiseStart"
+description: "Noise starts at 1.5 instead of 1.0, still ending at 0.01"
+
+training:
+  latent_noise_start: 1.5

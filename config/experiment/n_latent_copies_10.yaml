@@ -1,0 +1,38 @@
+# Experiment: n_latent_copies=10 -- each training/val image gets 10
+# independent representation rows instead of 1, each independently noised
+# and trained in parallel against the same target image (see config.yaml's
+# model.representation.n_latent_copies comment for the full mechanism).
+# Motivated by the zshift diagnostic (figures/training/noise_*/epoch*.png,
+# third panel): a noised point tends to walk back close to where it started,
+# which is only visible per-point *across* epochs. With 10 copies of the
+# same image, a well-behaved model should pull all 10 close together --
+# directly visible *within* one checkpoint as 10 same-colored points nearly
+# on top of each other in the latent_train/latent_val plots (and their
+# animations). plot_interval is set so there's an actual progression (and
+# GIF/MP4) to watch this converge over training, not just the final
+# best-model snapshot.
+#
+# Cost: the decoder sees 10x as many rows per step (batch_size 256 images ->
+# 2560 representation rows through ConvDecoder each step) -- representation
+# memory itself is trivial (a few MB even at 10x), but expect roughly 10x
+# the per-epoch decoder compute of the equivalent n_latent_copies=1 run.
+# recon/GMM loss terms are averaged across the 10 copies first (see
+# trainer.py), so loss magnitudes stay directly comparable to baseline.yaml.
+experiment_name: "ImageDGD_NLatentCopies10"
+description: "10 independent, independently-noised representation rows per image, to watch whether they converge together"
+
+model:
+  representation:
+    n_latent_copies: 10
+
+training:
+  # Make sure the noise/latent progression (and its animation) gets
+  # generated throughout this run -- the whole point of this experiment.
+  # 25 instead of the usual 10: with n_latent_copies=10, every checkpoint's
+  # latent_train/latent_val figures embed 10x as many points (PCA/UMAP/t-SNE
+  # refit each time -- see plot_latent_space), which made this run's post-hoc
+  # figure generation incredibly slow at the usual cadence. 25 still gives 8
+  # progression frames over 200 epochs.
+  plot_interval: 25
+  inference:
+    plot_interval: 25

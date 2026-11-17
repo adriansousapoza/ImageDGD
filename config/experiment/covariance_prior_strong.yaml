@@ -1,0 +1,34 @@
+# Experiment: a Bayesian MAP shrinkage prior on the GMM's covariance
+# (covariance_prior + degrees_of_freedom_prior), instead of reg_covar's hard
+# additive floor -- which was tried in a real run and didn't stop collapse
+# (reverted in config.yaml; see its comment there). Deliberately calibrated
+# to a *stronger* asymptotic floor (target variance 0.3, std ~0.55) than the
+# failed reg_covar=0.1 attempt, not the same one restated: recalibrating to
+# the same floor would just reproduce the same failure via a different
+# formula.
+#
+# degrees_of_freedom_prior=20000 gives the prior real weight even against
+# this run's N~56000 training points (pull strength = dof/(dof+N) ~ 0.26 --
+# see the conversation for why tgmm's own default suggest_priors() value,
+# dof=n_features+2=10, would be ~0.0002 and functionally inert at this N).
+# covariance_prior is solved from that dof to hit the 0.3 target in the
+# collapse limit: covariance_prior = target_var * (dof+N+n_features) * n_features
+#   = 0.3 * (20000 + 56000 + 8) * 8 = 182419.2
+# Recompute both if N (data.total_subset_fraction) or n_features changes --
+# neither number is meaningful on its own, only as this calibrated pair.
+#
+# mean_prior/mean_precision_prior stay null on purpose -- only regularizing
+# covariance, not pulling cluster centers toward a prior mean.
+experiment_name: "ImageDGD_CovariancePriorStrong"
+description: "MAP covariance shrinkage prior (target floor variance 0.3, dof=20000) instead of reg_covar"
+
+model:
+  gmm:
+    covariance_prior: 200000
+    degrees_of_freedom_prior: 20000
+
+training:
+  # Make sure the noise/spread diagnostic gets generated throughout this run.
+  plot_interval: 10
+  inference:
+    plot_interval: 10
