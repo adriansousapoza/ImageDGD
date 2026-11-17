@@ -28,19 +28,23 @@ python -c "import torch; print(f'PyTorch {torch.__version__} | CUDA available: {
 
 ## Usage
 
-Start with `notebooks/dgd_training_demo.ipynb` for a full training walkthrough, then `notebooks/dgd_test_inference.ipynb` for inference on held-out data. `notebooks/run_experiments.ipynb` runs a batch of ablations defined as config overrides in `config/experiment/`.
+New to the DGD? Start with `notebooks/intro_to_dgd.ipynb`: what a DGD is, the architecture and training procedure in formulas, the repository layout, and the `config.yaml` hyperparameters.
 
-Two smaller, faster notebooks demonstrate the same mechanism at toy scale: `notebooks/toy_dgd_blobs.ipynb` (synthetic 2-blob data, a small MLP decoder, runs in seconds) and `notebooks/toy_dgd_mnist.ipynb` (two real MNIST digits, the exact `ConvDecoder`/`config.yaml` architecture the FashionMNIST pipeline uses, runs in a few minutes).
+Then use `notebooks/dgd_training_demo.ipynb` for a full training walkthrough and `notebooks/dgd_test_inference.ipynb` for inference on held-out data. `notebooks/run_experiments.ipynb` runs a batch of ablations defined as config overrides in `config/experiment/`, and `notebooks/compare_experiments.ipynb` compares the finished runs.
+
+Optional training features (Muon optimiser, decoder EMA, growing GMM, cluster jumps, latent walk, loss reduction, final GMM) are all off by default and documented in [`docs/training_options.md`](docs/training_options.md).
 
 ## Project Structure
 
 - `config/` - Hydra base config (`config.yaml`) and per-experiment overrides (`experiment/`)
 - `data/` - Dataset storage (downloaded on first run)
+- `docs/` - Documentation of the optional training features
 - `experiments/` - Timestamped training/inference run outputs (gitignored)
-- `models/` - Saved model checkpoints
-- `notebooks/` - Training, inference, and ablation notebooks
+- `models/` - Saved model checkpoints (gitignored)
+- `notebooks/` - Introduction, training, inference, and ablation notebooks (committed with outputs stripped); `assets/` holds the figures used by the intro
 - `src/` - Source code
   - `data/` - Data loading utilities
   - `models/` - Model implementations (DGD, GMM via `tgmm`, PCA, representation layer)
   - `training/` - Training loop
-  - `visualization/` - Plotting and report generation
+  - `visualization/` - Plotting, report generation, and animations
+  - `utils/` - Device setup, noise schedules, checkpoint save/load
