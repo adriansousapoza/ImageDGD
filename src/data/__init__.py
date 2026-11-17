@@ -5,6 +5,7 @@ from .dataloader import (
     load_sample_batches,
     collect_all_labels,
     collect_class_samples,
+    pick_class_representative_indices,
 )
 
 __all__ = [
@@ -14,4 +15,5 @@ __all__ = [
     'load_sample_batches',
     'collect_all_labels',
     'collect_class_samples',
+    'pick_class_representative_indices',
 ]

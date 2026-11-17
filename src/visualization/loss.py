@@ -5,7 +5,7 @@ import matplotlib.pyplot as plt
 from typing import List, Optional, Any
 from omegaconf import DictConfig
 
-from ..utils.schedules import cosine_noise_schedule
+from ..utils.schedules import noise_schedule as _noise_schedule_fn
 
 
 def plot_training_analysis(
@@ -243,28 +243,31 @@ def plot_training_dynamics(
         axes2[1].text(0.5, 0.5, 'Momentum tracking\nnot available', ha='center', va='center', transform=axes2[1].transAxes)
         axes2[1].set_title('Momentum Schedule')
 
-    # 3. Noise Level (Cosine Annealing)
+    # 3. Noise Level
     if trainer.training_config.get('latent_noise_enabled', False):
         noise_start = trainer.training_config.get('latent_noise_start', 1.0)
         noise_end = trainer.training_config.get('latent_noise_end', 0.01)
+        schedule_type = trainer.training_config.get('latent_noise_schedule', 'cosine')
+        warmup_epochs = trainer.training_config.get('latent_noise_warmup_epochs', 0)
         total_epochs = len(learning_rates)
 
         # Calculate noise schedule for all epochs
-        noise_schedule = [
-            cosine_noise_schedule(epoch, total_epochs, noise_start, noise_end)
+        noise_schedule_values = [
+            _noise_schedule_fn(epoch, total_epochs, noise_start, noise_end,
+                                schedule_type=schedule_type, warmup_steps=warmup_epochs)
             for epoch in range(1, total_epochs + 1)
         ]
 
         axes2[2].plot(
-            range(start_epoch, len(noise_schedule) + 1),
-            noise_schedule[start_idx:],
+            range(start_epoch, len(noise_schedule_values) + 1),
+            noise_schedule_values[start_idx:],
             'orange',
             label='Noise Level',
             linewidth=2
         )
         axes2[2].set_xlabel('Epoch')
         axes2[2].set_ylabel('Noise Scale')
-        axes2[2].set_title(f'Noise Schedule (Cosine Annealing: {noise_start:.2f} → {noise_end:.4f})')
+        axes2[2].set_title(f'Noise Schedule ({schedule_type}: {noise_start:.2f} → {noise_end:.4f})')
         axes2[2].legend()
         axes2[2].grid(True, alpha=0.3)
     else:

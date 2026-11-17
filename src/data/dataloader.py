@@ -161,6 +161,22 @@ def collect_all_labels(loader: DataLoader) -> torch.Tensor:
     return labels
 
 
+def pick_class_representative_indices(labels: torch.Tensor, n_classes: int, seed: int) -> torch.Tensor:
+    """One random index per class, deterministic given (labels, n_classes, seed).
+
+    Used to track the same fixed set of points across an entire training run
+    (trainer.py's z_trajectory checkpointing) and to independently re-derive
+    that same set post-hoc (report.py's noise-comparison figures) without
+    having to thread the indices through as extra state -- same labels, same
+    n_classes, same seed always picks the same points."""
+    rng = torch.Generator().manual_seed(seed)
+    picks = []
+    for c in range(n_classes):
+        class_idx = torch.where(labels == c)[0]
+        picks.append(class_idx[torch.randint(len(class_idx), (1,), generator=rng).item()].item())
+    return torch.tensor(picks)
+
+
 def collect_class_samples(loader: DataLoader, n_per_class: int, n_classes: int) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """Collect up to n_per_class samples for each class from a single loader."""
     class_samples = {i: {'indices': [], 'images': [], 'labels': []} for i in range(n_classes)}

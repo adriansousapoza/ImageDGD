@@ -12,4 +12,5 @@ from .visualization import (
     plot_latent_space,
     generate_latent_space_figures,
     plot_noise_comparison,
+    plot_representation_trajectory,
 )

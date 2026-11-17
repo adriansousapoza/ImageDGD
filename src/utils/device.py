@@ -2,7 +2,11 @@
 Device selection and setup utilities for PyTorch.
 """
 
-import cudf
+try:
+    # RAPIDS is optional (GPU-accelerated PCA/UMAP); importing it before torch is kept as before.
+    import cudf  # noqa: F401
+except ImportError:
+    cudf = None
 import torch
 import numpy as np
 from typing import Optional

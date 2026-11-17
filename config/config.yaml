@@ -5,12 +5,6 @@
 random_seed: 42
 experiment_name: "ImageDGD_Default"
 description: "Default ImageDGD training configuration"
-
-# Filesystem root for timestamped experiment run folders. Notebooks overwrite
-# this with an absolute path derived from project_root at runtime (same
-# pattern as data.root_dir), then resolve config.paths.models_dir/figures_dir
-# to point inside that run's own timestamped folder before training/inference
-# starts, so no run ever overwrites another's checkpoints or figures.
 paths:
   experiments_dir: "./experiments"
 
@@ -52,24 +46,14 @@ data:
 model:
   # Representation layer configuration
   representation:
-    n_features: 8
+    n_features: 4
     distribution: "zeros"  # Options: normal, uniform, uniform_ball, uniform_sphere, laplace, student_t, logistic, hyperbolic, zeros, pca
     dist_params: {}
-    # Distribution-specific parameters examples:
-    # {'radius': 1.0} # uniform_ball
-    # {'radius': 1.0} # uniform_sphere
-    # {'mean': 0, 'cov': 1} # normal
-    # {'low': -1.0, 'high': 1.0} # uniform
-    # {'loc': 0, 'scale_matrix': 1, 'rate': 1.0} # laplace
-    # {'df': 3.0, 'scale_matrix': 1} # student_t
-    # {'loc': 0, 'scale': 1} # logistic
-    # {'mu': 0, 'alpha': 1.5, 'beta': 0.0, 'delta': 1.0} # hyperbolic
-    # {} # zeros
-    # {'whiten': false, 'svd_solver': 'auto'} # pca (requires data at runtime)
+    n_latent_copies: 1
   
   # Decoder configuration
   decoder:
-    hidden_dims: [128, 64]
+    hidden_dims: [64, 32]
     output_channels: 1
     output_size: [28, 28]
     init_size: [7, 7]
@@ -110,51 +94,94 @@ training:
   epochs: 200
   device: "auto"
   
-  # Early stopping. Active from first_epoch_gmm onward; the GMM prior
-  # introduces per-refit val-loss noise (observed ~30-epoch oscillations
-  # around refit points), so patience needs enough margin to not mistake
-  # that noise for a genuine plateau.
   early_stopping_patience: null
   
-  # GMM training schedule
   first_epoch_gmm: 50
   refit_gmm_interval: 50
   lambda_gmm: 1.0
   final_gmm_fit: false
 
-  # Latent space noise injection (regularization)
-  latent_noise_enabled: true  # Enable noise injection
-  latent_noise_start: 1.0  # Starting noise scale (epoch 1)
-  latent_noise_end: 0.01     # Ending noise scale (final epoch)
+  # --- GMM schedule / loss / latent-move options (all default to the original behaviour) ---
+  # null = refit every refit_gmm_interval epochs for the whole run; e.g. 150 freezes the GMM after epoch 150
+  gmm_refit_until: null
+  # true  = cheap warm-started GMM update on EVERY epoch after first_epoch_gmm (original);
+  # false = hold the GMM constant between the refit epochs
+  gmm_update_between_refits: true
+  # Weight EMA of the decoder: validation latents use the averaged decoder and the best
+  # checkpoint stores it (the training latents still follow the raw decoder).
+  decoder_ema:
+    enabled: false
+    decay: 0.99          # per decoder step
+  # Growing GMM: start with schedule[0] components; at each scheduled refit epoch (>= first_epoch_gmm)
+  # move to the next entry, splitting the widest component along its principal axis. The last entry
+  # should equal model.gmm.n_components. One entry per refit epoch, e.g. first_epoch_gmm 50,
+  # refit interval 25, gmm_refit_until 150 -> 5 refit epochs -> a 5-entry schedule.
+  gmm_growth:
+    enabled: false
+    schedule: [1, 2, 4, 8, 20]
+  # Persistent latent walk: noise written INTO the stored latents (z <- z + eps) after each
+  # epoch's update, so they explore the space. Separate from latent_noise_* (per-batch, loss only).
+  # start/end are expected displacement norms per epoch, annealed with `schedule`.
+  latent_walk:
+    enabled: false
+    start: 0.05
+    end: 0.0
+    schedule: "cosine"   # constant | linear | cosine
+  # 'sum' (original) or 'mean' (per image). Applied to recon and GMM terms alike.
+  loss_reduction: "sum"
+  # Try moving latents into other GMM components; keep a move only if
+  # recon_sq_err - lambda_gmm*log p_gmm improves (clean, no noise).
+  cluster_jump:
+    enabled: false
+    start_epoch: 50
+    interval: 25
+    until: 150
+    n_candidates: 3     # candidate components tried per image
+    fraction: 1.0       # fraction of images attempted each round
+    margin: 0.0         # required loss improvement to accept
+  # Separate, richer GMM fitted once on the final latents; saved as best/gmm_final.pkl
+  final_gmm:
+    enabled: false
+    covariance_type: "full"
+    n_components: null  # null = model.gmm.n_components
+    n_init: 3
+    reg_covar: 1.0e-3   # escalated x10 (up to 3 times), then diag, if the fit goes singular
 
-  # Post-hoc inference (Algorithm 2): optimizing representations for the
-  # held-out test split against a frozen decoder + GMM. M0 (prior_warmup_steps)
-  # must be < epochs — a fresh z far from every mode is dominated by the prior
-  # gradient before reconstruction has informed it where to go; a short
-  # reconstruction-only warm-up lets it find its basin first.
+  plot_interval: 10
+
+  latent_noise_enabled: true  # Enable noise injection
+  latent_noise_start: 1.0  # Starting target displacement (epoch 1)
+  latent_noise_end: 0.01     # Ending target displacement (final epoch)
+  latent_noise_schedule: "cosine"  # Options: constant, linear, cosine, warmup_cosine
+  latent_noise_warmup_epochs: 0    # Only used when latent_noise_schedule == "warmup_cosine"
+
   inference:
     epochs: 400            # M: total optimization steps
     prior_warmup_steps: ${training.first_epoch_gmm} # M0: steps before the GMM prior term is added
-    # Mirrors the top-level latent_noise_enabled/_start/_end above via
-    # OmegaConf interpolation, so inference uses the exact same noise
-    # settings training did by default. Override any of these three lines
-    # with a literal value to make inference's noise independently tunable
-    # again -- interpolation only applies while the field is left as ${...}.
     latent_noise_enabled: ${training.latent_noise_enabled}  # Enable noise injection
     latent_noise_start: ${training.latent_noise_start}  # Starting noise scale (step 1)
     latent_noise_end: ${training.latent_noise_end}     # Ending noise scale (final step M)
+    latent_noise_schedule: ${training.latent_noise_schedule}
+    latent_noise_warmup_epochs: ${training.latent_noise_warmup_epochs}
+
+    plot_interval: ${training.plot_interval}
 
   # Optimizer configuration (AdamW)
   optimizer:
     decoder:
+      type: "adamw"            # "adamw" or "muon" (Muon on the 2-D weight matrices, AdamW on the rest;
+                               # with ConvDecoder only the initial Linear layer is 2-D -- conv kernels stay on AdamW)
+      # muon_lr_mult: 1.0        # Muon lr = lr * muon_lr_mult
+      # muon_adjust_lr_fn: "match_rms_adamw"   # or "original"
+      # muon_momentum: 0.95
       lr: 0.01
       weight_decay: 0.01
       betas: [0.9, 0.999]
       eps: 1e-8
       amsgrad: false
     representation:
-      lr: 0.1
-      weight_decay: 0
+      lr: 0.03
+      weight_decay: 0.0     # 0 vs 0.01 identical in PerturbDGD's sweeps
       betas: [0.9, 0.999]
       eps: 1e-8
       amsgrad: false
@@ -165,5 +192,5 @@ training:
     enabled: true
     base_lr_decoder: 0.01          # Starting LR for decoder (if null, uses optimizer.decoder.lr)
     final_lr_decoder: 0.001       # Ending LR for decoder
-    base_lr_representation: 0.1    # Starting LR for representations (if null, uses optimizer.representation.lr)
-    final_lr_representation: 0.01 # Ending LR for representations
+    base_lr_representation: 0.03    # Starting LR for representations (if null, uses optimizer.representation.lr)
+    final_lr_representation: 0.003 # Ending LR for representations
